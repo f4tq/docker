@@ -18,13 +18,15 @@ type containerRouter struct {
 	backend Backend
 	decoder httputils.ContainerDecoder
 	routes  []router.Route
+	policy  router.Policy
 }
 
 // NewRouter initializes a new container router
-func NewRouter(b Backend, decoder httputils.ContainerDecoder) router.Router {
+func NewRouter(b Backend, decoder httputils.ContainerDecoder, policy router.Policy) router.Router {
 	r := &containerRouter{
 		backend: b,
 		decoder: decoder,
+		policy: policy,
 	}
 	r.initRoutes()
 	return r
@@ -34,7 +36,10 @@ func NewRouter(b Backend, decoder httputils.ContainerDecoder) router.Router {
 func (r *containerRouter) Routes() []router.Route {
 	return r.routes
 }
-
+// Routes returns the Policy to the container controller
+func (r *containerRouter) Policy() router.Policy {
+	return r.policy
+}
 // initRoutes initializes the routes in container router
 func (r *containerRouter) initRoutes() {
 	r.routes = []router.Route{

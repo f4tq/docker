@@ -49,9 +49,9 @@ type LogConfig struct {
 	Type   string            `json:"log-driver,omitempty"`
 	Config map[string]string `json:"log-opts,omitempty"`
 }
-
 // commonBridgeConfig stores all the platform-common bridge driver specific
 // configuration.
+
 type commonBridgeConfig struct {
 	Iface     string `json:"bridge,omitempty"`
 	FixedCIDR string `json:"fixed-cidr,omitempty"`
@@ -118,6 +118,7 @@ type CommonConfig struct {
 	LogLevel  string   `json:"log-level,omitempty"`
 	TLS       bool     `json:"tls,omitempty"`
 	TLSVerify bool     `json:"tlsverify,omitempty"`
+
 
 	// Embedded structs that allow config
 	// deserialization without the full struct.

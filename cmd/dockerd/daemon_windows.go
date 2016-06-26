@@ -12,6 +12,8 @@ import (
 )
 
 var defaultDaemonConfigFile = os.Getenv("programdata") + string(os.PathSeparator) + "docker" + string(os.PathSeparator) + "config" + string(os.PathSeparator) + "daemon.json"
+var defaultClientPolicyConfigFile = os.Getenv("programdata") + string(os.PathSeparator) + "docker" + string(os.PathSeparator) + "config" + string(os.PathSeparator) + "client-policy.json"
+
 
 // currentUserIsOwner checks whether the current user is the owner of the given
 // file.

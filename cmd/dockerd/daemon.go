@@ -45,6 +45,7 @@ import (
 
 const (
 	daemonConfigFileFlag = "-config-file"
+	clientPolicyConfigFileFlag = "-client-policy-config-file"
 )
 
 // DaemonCli represents the daemon CLI.
@@ -52,7 +53,7 @@ type DaemonCli struct {
 	*daemon.Config
 	commonFlags *cliflags.CommonFlags
 	configFile  *string
-
+	policyConfigFile *string
 	api *apiserver.Server
 	d   *daemon.Daemon
 }
@@ -74,11 +75,15 @@ func NewDaemonCli() *DaemonCli {
 	daemonConfig.InstallFlags(flag.CommandLine, presentInHelp)
 	configFile := flag.CommandLine.String([]string{daemonConfigFileFlag}, defaultDaemonConfigFile, "Daemon configuration file")
 	flag.CommandLine.Require(flag.Exact, 0)
+	policyConfigFile := flag.CommandLine.String([]string{clientPolicyConfigFileFlag}, "", "Daemon client policy configuration file")
+	flag.CommandLine.Require(flag.Exact, 0)
+
 
 	return &DaemonCli{
 		Config:      daemonConfig,
 		commonFlags: cliflags.InitCommonFlags(),
 		configFile:  configFile,
+		policyConfigFile: policyConfigFile,
 	}
 }
 
@@ -273,7 +278,20 @@ func (cli *DaemonCli) start() (err error) {
 	}).Info("Docker daemon")
 
 	cli.initMiddlewares(api, serverConfig)
-	initRouter(api, d)
+	var policy router.Policy
+        if *cli.configFile != "" {
+		polCfg,polErr := router.GetPolicyConfiguration(*cli.policyConfigFile)
+		if polErr != nil {
+			return polErr
+		}
+		if cp, err := router.NewPolicy(polCfg); err != nil {
+			return err
+		} else {
+			policy = cp
+		}
+	}
+
+	initRouter(api, d, policy)
 
 	cli.d = d
 	cli.api = api
@@ -373,7 +391,6 @@ func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfi
 			config = c
 		}
 	}
-
 	// Regardless of whether the user sets it to true or false, if they
 	// specify TLSVerify at all then we need to turn on TLS
 	if config.IsValueSet(cliflags.TLSVerifyKey) {
@@ -386,11 +403,11 @@ func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfi
 	return config, nil
 }
 
-func initRouter(s *apiserver.Server, d *daemon.Daemon) {
+func initRouter(s *apiserver.Server, d *daemon.Daemon,p router.Policy) {
 	decoder := runconfig.ContainerDecoder{}
 
 	routers := []router.Router{
-		container.NewRouter(d, decoder),
+		container.NewRouter(d, decoder,p),
 		image.NewRouter(d, decoder),
 		systemrouter.NewRouter(d),
 		volume.NewRouter(d),

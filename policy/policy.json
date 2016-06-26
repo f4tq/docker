@@ -1,0 +1,45 @@
+{
+  "Validator": {
+    "func_timeout": 2,
+    "jsmain": "test_script.js",
+    "jslibdir" : "./policy/fixtures/",
+    "jspreload": ["json_stringify.js"],
+    "facts": "./policy/fixtures/facts/localhost"
+  },
+  "Logging": {
+    "enforce": true,
+    "default": "syslog"
+  },
+  "LoggingProfiles":{
+    "syslog":{
+      "syslog-tag": "cpdf2-tag",
+      "syslog-facility": "kern",
+      "syslog-address": "localhost:415"
+    },
+    "coreos-defaults-json":{
+      "max-file": "10",
+      "max-size":"40m"
+    },
+    "staging-pdfservices":{
+      "fluentd-address": "my fluentd-address",
+      "fluentd-buffer-limit": " my fluentd-buffer-limit"
+    },
+    "splunk": {
+      "splunk-url" : "http://foo.com",
+      "splunk-token": "<some token>",
+      "splunk-source": "<some source key>",
+      "splunk-source-type": "<some source type>",
+      "splunk-index-key": "<some index key>",
+      "splunk-capath": "<capath>",
+      "splunk-caname": "<caname>",
+      "splunk-insecureskipverify": "false"
+    },
+    "ethos-f4tq" : {
+      "awslogs-region":"us-east-1",
+      "awslogs-group": "foobar",
+      "awslogs-stream" :"bar-foo"
+
+
+    }
+  }
+}

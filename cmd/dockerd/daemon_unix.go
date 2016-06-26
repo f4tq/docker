@@ -19,7 +19,7 @@ import (
 )
 
 const defaultDaemonConfigFile = "/etc/docker/daemon.json"
-
+const defaultClientPolicyConfigFile = "/etc/docker/client-policy.json"
 // currentUserIsOwner checks whether the current user is the owner of the given
 // file.
 func currentUserIsOwner(f string) bool {

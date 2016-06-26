@@ -14,6 +14,7 @@ import (
 )
 
 const defaultDaemonConfigFile = ""
+const defaultClientPolicyConfigFile =""
 
 // currentUserIsOwner checks whether the current user is the owner of the given
 // file.

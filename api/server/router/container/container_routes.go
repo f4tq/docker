@@ -351,13 +351,24 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 	version := httputils.VersionFromContext(ctx)
 	adjustCPUShares := versions.LessThan(version, "1.19")
 
-	ccr, err := s.backend.ContainerCreate(types.ContainerCreateConfig{
+	cfg := types.ContainerCreateConfig{
 		Name:             name,
 		Config:           config,
 		HostConfig:       hostConfig,
 		NetworkingConfig: networkingConfig,
 		AdjustCPUShares:  adjustCPUShares,
-	})
+	}
+
+	logrus.Debugf("create:   containerRouter: %+v", cfg)
+	if s.policy != nil {
+		// run again
+		v:= s.policy
+		if err := v.ValidateCreate(&cfg); err != nil {
+			return err
+		}
+	}
+
+	ccr, err := s.backend.ContainerCreate(cfg)
 	if err != nil {
 		return err
 	}
