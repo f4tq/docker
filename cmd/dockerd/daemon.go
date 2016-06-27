@@ -20,12 +20,14 @@ import (
 	"github.com/docker/docker/api/server/router/container"
 	"github.com/docker/docker/api/server/router/image"
 	"github.com/docker/docker/api/server/router/network"
+	swarmrouter "github.com/docker/docker/api/server/router/swarm"
 	systemrouter "github.com/docker/docker/api/server/router/system"
 	"github.com/docker/docker/api/server/router/volume"
 	"github.com/docker/docker/builder/dockerfile"
 	cliflags "github.com/docker/docker/cli/flags"
 	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/daemon"
+	"github.com/docker/docker/daemon/cluster"
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/libcontainerd"
@@ -132,11 +134,6 @@ func (cli *DaemonCli) start() (err error) {
 	stopc := make(chan bool)
 	defer close(stopc)
 
-	signal.Trap(func() {
-		cli.stop()
-		<-stopc // wait for daemonCli.start() to return
-	})
-
 	// warn from uuid package when running the daemon
 	uuid.Loggerf = logrus.Warnf
 
@@ -218,6 +215,7 @@ func (cli *DaemonCli) start() (err error) {
 	}
 
 	api := apiserver.New(serverConfig)
+	cli.api = api
 
 	for i := 0; i < len(cli.Config.Hosts); i++ {
 		var err error
@@ -263,10 +261,30 @@ func (cli *DaemonCli) start() (err error) {
 	if err != nil {
 		return err
 	}
+	cli.api = api
+	signal.Trap(func() {
+		cli.stop()
+		<-stopc // wait for daemonCli.start() to return
+	})
+
+	if err := pluginInit(cli.Config, containerdRemote, registryService); err != nil {
+		return err
+	}
 
 	d, err := daemon.NewDaemon(cli.Config, registryService, containerdRemote)
 	if err != nil {
 		return fmt.Errorf("Error starting daemon: %v", err)
+	}
+
+	name, _ := os.Hostname()
+
+	c, err := cluster.New(cluster.Config{
+		Root:    cli.Config.Root,
+		Name:    name,
+		Backend: d,
+	})
+	if err != nil {
+		logrus.Fatalf("Error creating cluster component: %v", err)
 	}
 
 	logrus.Info("Daemon has completed initialization")
@@ -278,6 +296,7 @@ func (cli *DaemonCli) start() (err error) {
 	}).Info("Docker daemon")
 
 	cli.initMiddlewares(api, serverConfig)
+
 	var policy router.Policy
         if *cli.configFile != "" {
 		polCfg,polErr := router.GetPolicyConfiguration(*cli.policyConfigFile)
@@ -291,10 +310,9 @@ func (cli *DaemonCli) start() (err error) {
 		}
 	}
 
-	initRouter(api, d, policy)
+	initRouter(api, d, c,policy)
 
 	cli.d = d
-	cli.api = api
 	cli.setupConfigReloadTrap()
 
 	// The serve API routine never exits unless an error occurs
@@ -309,6 +327,7 @@ func (cli *DaemonCli) start() (err error) {
 	// Daemon is fully initialized and handling API traffic
 	// Wait for serve API to complete
 	errAPI := <-serveAPIWait
+	c.Cleanup()
 	shutdownDaemon(d, 15)
 	containerdRemote.Cleanup()
 	if errAPI != nil {
@@ -391,6 +410,10 @@ func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfi
 			config = c
 		}
 	}
+
+	if err := daemon.ValidateConfiguration(config); err != nil {
+		return nil, err
+	}
 	// Regardless of whether the user sets it to true or false, if they
 	// specify TLSVerify at all then we need to turn on TLS
 	if config.IsValueSet(cliflags.TLSVerifyKey) {
@@ -403,19 +426,21 @@ func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfi
 	return config, nil
 }
 
-func initRouter(s *apiserver.Server, d *daemon.Daemon,p router.Policy) {
+func initRouter(s *apiserver.Server, d *daemon.Daemon, c *cluster.Cluster,p router.Policy) {
 	decoder := runconfig.ContainerDecoder{}
 
 	routers := []router.Router{
 		container.NewRouter(d, decoder,p),
 		image.NewRouter(d, decoder),
-		systemrouter.NewRouter(d),
+		systemrouter.NewRouter(d, c),
 		volume.NewRouter(d),
 		build.NewRouter(dockerfile.NewBuildManager(d)),
+		swarmrouter.NewRouter(c),
 	}
 	if d.NetworkControllerEnabled() {
-		routers = append(routers, network.NewRouter(d))
+		routers = append(routers, network.NewRouter(d, c))
 	}
+	routers = addExperimentalRouters(routers)
 
 	s.InitRouter(utils.IsDebugEnabled(), routers...)
 }

@@ -175,7 +175,7 @@ func (d *Daemon) ContainerExecStart(ctx context.Context, name string, stdin io.R
 		r, w := io.Pipe()
 		go func() {
 			defer w.Close()
-			defer logrus.Debugf("Closing buffered stdin pipe")
+			defer logrus.Debug("Closing buffered stdin pipe")
 			pools.Copy(w, stdin)
 		}()
 		cStdin = r
@@ -222,7 +222,10 @@ func (d *Daemon) ContainerExecStart(ctx context.Context, name string, stdin io.R
 		return fmt.Errorf("context cancelled")
 	case err := <-attachErr:
 		if err != nil {
-			return fmt.Errorf("attach failed with error: %v", err)
+			if _, ok := err.(container.DetachError); !ok {
+				return fmt.Errorf("exec attach failed with error: %v", err)
+			}
+			d.LogContainerEvent(c, "exec_detach")
 		}
 	}
 	return nil

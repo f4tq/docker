@@ -33,6 +33,7 @@ var acceptedPsFilterTags = map[string]bool{
 	"status":    true,
 	"since":     true,
 	"volume":    true,
+	"network":   true,
 }
 
 // iterationAction represents possible outcomes happening during the container iteration.
@@ -88,6 +89,17 @@ type listContext struct {
 // Containers returns the list of containers to show given the user's filtering.
 func (daemon *Daemon) Containers(config *types.ContainerListOptions) ([]*types.Container, error) {
 	return daemon.reduceContainers(config, daemon.transformContainer)
+}
+
+// ListContainersForNode returns all containerID that match the specified nodeID
+func (daemon *Daemon) ListContainersForNode(nodeID string) []string {
+	var ids []string
+	for _, c := range daemon.List() {
+		if c.Config.Labels["com.docker.swarm.node.id"] == nodeID {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids
 }
 
 func (daemon *Daemon) filterByNameIDMatches(ctx *listContext) []*container.Container {
@@ -325,7 +337,7 @@ func includeContainerInList(container *container.Container, ctx *listContext) it
 	if len(ctx.exitAllowed) > 0 {
 		shouldSkip := true
 		for _, code := range ctx.exitAllowed {
-			if code == container.ExitCode && !container.Running && !container.StartedAt.IsZero() {
+			if code == container.ExitCode() && !container.Running && !container.StartedAt.IsZero() {
 				shouldSkip = false
 				break
 			}
@@ -370,6 +382,24 @@ func includeContainerInList(container *container.Container, ctx *listContext) it
 			return excludeContainer
 		}
 		if !ctx.images[container.ImageID] {
+			return excludeContainer
+		}
+	}
+
+	networkExist := fmt.Errorf("container part of network")
+	if ctx.filters.Include("network") {
+		err := ctx.filters.WalkValues("network", func(value string) error {
+			if _, ok := container.NetworkSettings.Networks[value]; ok {
+				return networkExist
+			}
+			for _, nw := range container.NetworkSettings.Networks {
+				if nw.NetworkID == value {
+					return networkExist
+				}
+			}
+			return nil
+		})
+		if err != networkExist {
 			return excludeContainer
 		}
 	}
@@ -435,6 +465,7 @@ func (daemon *Daemon) transformContainer(container *container.Container, ctx *li
 			GlobalIPv6Address:   network.GlobalIPv6Address,
 			GlobalIPv6PrefixLen: network.GlobalIPv6PrefixLen,
 			MacAddress:          network.MacAddress,
+			NetworkID:           network.NetworkID,
 		}
 		if network.IPAMConfig != nil {
 			networks[name].IPAMConfig = &networktypes.EndpointIPAMConfig{
@@ -499,6 +530,10 @@ func (daemon *Daemon) Volumes(filter string) ([]*types.Volume, []string, error) 
 	}
 
 	volumes, warnings, err := daemon.volumes.List()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	filterVolumes, err := daemon.filterVolumes(volumes, volFilters)
 	if err != nil {
 		return nil, nil, err

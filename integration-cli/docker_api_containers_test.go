@@ -480,10 +480,10 @@ func (s *DockerSuite) TestContainerApiBadPort(c *check.C) {
 	jsonData := bytes.NewBuffer(nil)
 	json.NewEncoder(jsonData).Encode(config)
 
-	status, b, err := sockRequest("POST", "/containers/create", config)
+	status, body, err := sockRequest("POST", "/containers/create", config)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusInternalServerError)
-	c.Assert(strings.TrimSpace(string(b)), checker.Equals, `Invalid port specification: "aa80"`, check.Commentf("Incorrect error msg: %s", string(b)))
+	c.Assert(getErrorMessage(c, body), checker.Equals, `Invalid port specification: "aa80"`, check.Commentf("Incorrect error msg: %s", body))
 }
 
 func (s *DockerSuite) TestContainerApiCreate(c *check.C) {
@@ -509,12 +509,12 @@ func (s *DockerSuite) TestContainerApiCreate(c *check.C) {
 func (s *DockerSuite) TestContainerApiCreateEmptyConfig(c *check.C) {
 	config := map[string]interface{}{}
 
-	status, b, err := sockRequest("POST", "/containers/create", config)
+	status, body, err := sockRequest("POST", "/containers/create", config)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusInternalServerError)
 
-	expected := "Config cannot be empty in order to create a container\n"
-	c.Assert(string(b), checker.Equals, expected)
+	expected := "Config cannot be empty in order to create a container"
+	c.Assert(getErrorMessage(c, body), checker.Equals, expected)
 }
 
 func (s *DockerSuite) TestContainerApiCreateMultipleNetworksConfig(c *check.C) {
@@ -530,14 +530,15 @@ func (s *DockerSuite) TestContainerApiCreateMultipleNetworksConfig(c *check.C) {
 		},
 	}
 
-	status, b, err := sockRequest("POST", "/containers/create", config)
+	status, body, err := sockRequest("POST", "/containers/create", config)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusBadRequest)
+	msg := getErrorMessage(c, body)
 	// network name order in error message is not deterministic
-	c.Assert(string(b), checker.Contains, "Container cannot be connected to network endpoints")
-	c.Assert(string(b), checker.Contains, "net1")
-	c.Assert(string(b), checker.Contains, "net2")
-	c.Assert(string(b), checker.Contains, "net3")
+	c.Assert(msg, checker.Contains, "Container cannot be connected to network endpoints")
+	c.Assert(msg, checker.Contains, "net1")
+	c.Assert(msg, checker.Contains, "net2")
+	c.Assert(msg, checker.Contains, "net3")
 }
 
 func (s *DockerSuite) TestContainerApiCreateWithHostName(c *check.C) {
@@ -892,7 +893,7 @@ func (s *DockerSuite) TestContainerApiWait(c *check.C) {
 	c.Assert(waitres.StatusCode, checker.Equals, 0)
 }
 
-func (s *DockerSuite) TestContainerApiCopy(c *check.C) {
+func (s *DockerSuite) TestContainerApiCopyNotExistsAnyMore(c *check.C) {
 	// TODO Windows to Windows CI. This can be ported.
 	testRequires(c, DaemonIsLinux)
 	name := "test-container-api-copy"
@@ -902,7 +903,22 @@ func (s *DockerSuite) TestContainerApiCopy(c *check.C) {
 		Resource: "/test.txt",
 	}
 
-	status, body, err := sockRequest("POST", "/containers/"+name+"/copy", postData)
+	status, _, err := sockRequest("POST", "/containers/"+name+"/copy", postData)
+	c.Assert(err, checker.IsNil)
+	c.Assert(status, checker.Equals, http.StatusNotFound)
+}
+
+func (s *DockerSuite) TestContainerApiCopyPre124(c *check.C) {
+	// TODO Windows to Windows CI. This can be ported.
+	testRequires(c, DaemonIsLinux)
+	name := "test-container-api-copy"
+	dockerCmd(c, "run", "--name", name, "busybox", "touch", "/test.txt")
+
+	postData := types.CopyConfig{
+		Resource: "/test.txt",
+	}
+
+	status, body, err := sockRequest("POST", "/v1.23/containers/"+name+"/copy", postData)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusOK)
 
@@ -923,7 +939,7 @@ func (s *DockerSuite) TestContainerApiCopy(c *check.C) {
 	c.Assert(found, checker.True)
 }
 
-func (s *DockerSuite) TestContainerApiCopyResourcePathEmpty(c *check.C) {
+func (s *DockerSuite) TestContainerApiCopyResourcePathEmptyPr124(c *check.C) {
 	// TODO Windows to Windows CI. This can be ported.
 	testRequires(c, DaemonIsLinux)
 	name := "test-container-api-copy-resource-empty"
@@ -933,13 +949,13 @@ func (s *DockerSuite) TestContainerApiCopyResourcePathEmpty(c *check.C) {
 		Resource: "",
 	}
 
-	status, body, err := sockRequest("POST", "/containers/"+name+"/copy", postData)
+	status, body, err := sockRequest("POST", "/v1.23/containers/"+name+"/copy", postData)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusInternalServerError)
 	c.Assert(string(body), checker.Matches, "Path cannot be empty\n")
 }
 
-func (s *DockerSuite) TestContainerApiCopyResourcePathNotFound(c *check.C) {
+func (s *DockerSuite) TestContainerApiCopyResourcePathNotFoundPre124(c *check.C) {
 	// TODO Windows to Windows CI. This can be ported.
 	testRequires(c, DaemonIsLinux)
 	name := "test-container-api-copy-resource-not-found"
@@ -949,18 +965,18 @@ func (s *DockerSuite) TestContainerApiCopyResourcePathNotFound(c *check.C) {
 		Resource: "/notexist",
 	}
 
-	status, body, err := sockRequest("POST", "/containers/"+name+"/copy", postData)
+	status, body, err := sockRequest("POST", "/v1.23/containers/"+name+"/copy", postData)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusInternalServerError)
 	c.Assert(string(body), checker.Matches, "Could not find the file /notexist in container "+name+"\n")
 }
 
-func (s *DockerSuite) TestContainerApiCopyContainerNotFound(c *check.C) {
+func (s *DockerSuite) TestContainerApiCopyContainerNotFoundPr124(c *check.C) {
 	postData := types.CopyConfig{
 		Resource: "/something",
 	}
 
-	status, _, err := sockRequest("POST", "/containers/notexists/copy", postData)
+	status, _, err := sockRequest("POST", "/v1.23/containers/notexists/copy", postData)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusNotFound)
 }
@@ -982,7 +998,7 @@ func (s *DockerSuite) TestContainerApiDeleteNotExist(c *check.C) {
 	status, body, err := sockRequest("DELETE", "/containers/doesnotexist", nil)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusNotFound)
-	c.Assert(string(body), checker.Matches, "No such container: doesnotexist\n")
+	c.Assert(getErrorMessage(c, body), checker.Matches, "No such container: doesnotexist")
 }
 
 func (s *DockerSuite) TestContainerApiDeleteForce(c *check.C) {
@@ -1060,7 +1076,7 @@ func (s *DockerSuite) TestContainerApiChunkedEncoding(c *check.C) {
 	// TODO Windows CI: This can be ported
 	testRequires(c, DaemonIsLinux)
 
-	conn, err := sockConn(time.Duration(10 * time.Second))
+	conn, err := sockConn(time.Duration(10*time.Second), "")
 	c.Assert(err, checker.IsNil)
 	client := httputil.NewClientConn(conn, nil)
 	defer client.Close()
@@ -1232,8 +1248,8 @@ func (s *DockerSuite) TestPostContainersCreateWithWrongCpusetValues(c *check.C) 
 	status, body, err := sockRequest("POST", "/containers/create?name="+name, c1)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusInternalServerError)
-	expected := "Invalid value 1-42,, for cpuset cpus\n"
-	c.Assert(string(body), checker.Equals, expected)
+	expected := "Invalid value 1-42,, for cpuset cpus"
+	c.Assert(getErrorMessage(c, body), checker.Equals, expected)
 
 	c2 := struct {
 		Image      string
@@ -1243,8 +1259,8 @@ func (s *DockerSuite) TestPostContainersCreateWithWrongCpusetValues(c *check.C) 
 	status, body, err = sockRequest("POST", "/containers/create?name="+name, c2)
 	c.Assert(err, checker.IsNil)
 	c.Assert(status, checker.Equals, http.StatusInternalServerError)
-	expected = "Invalid value 42-3,1-- for cpuset mems\n"
-	c.Assert(string(body), checker.Equals, expected)
+	expected = "Invalid value 42-3,1-- for cpuset mems"
+	c.Assert(getErrorMessage(c, body), checker.Equals, expected)
 }
 
 func (s *DockerSuite) TestPostContainersCreateShmSizeNegative(c *check.C) {
@@ -1258,7 +1274,7 @@ func (s *DockerSuite) TestPostContainersCreateShmSizeNegative(c *check.C) {
 	status, body, err := sockRequest("POST", "/containers/create", config)
 	c.Assert(err, check.IsNil)
 	c.Assert(status, check.Equals, http.StatusInternalServerError)
-	c.Assert(string(body), checker.Contains, "SHM size must be greater than 0")
+	c.Assert(getErrorMessage(c, body), checker.Contains, "SHM size must be greater than 0")
 }
 
 func (s *DockerSuite) TestPostContainersCreateShmSizeHostConfigOmitted(c *check.C) {
@@ -1394,9 +1410,11 @@ func (s *DockerSuite) TestPostContainersCreateWithOomScoreAdjInvalidRange(c *che
 	status, b, err := sockRequest("POST", "/containers/create?name="+name, config)
 	c.Assert(err, check.IsNil)
 	c.Assert(status, check.Equals, http.StatusInternalServerError)
+
 	expected := "Invalid value 1001, range for oom score adj is [-1000, 1000]"
-	if !strings.Contains(string(b), expected) {
-		c.Fatalf("Expected output to contain %q, got %q", expected, string(b))
+	msg := getErrorMessage(c, b)
+	if !strings.Contains(msg, expected) {
+		c.Fatalf("Expected output to contain %q, got %q", expected, msg)
 	}
 
 	config = struct {
@@ -1408,8 +1426,9 @@ func (s *DockerSuite) TestPostContainersCreateWithOomScoreAdjInvalidRange(c *che
 	c.Assert(err, check.IsNil)
 	c.Assert(status, check.Equals, http.StatusInternalServerError)
 	expected = "Invalid value -1001, range for oom score adj is [-1000, 1000]"
-	if !strings.Contains(string(b), expected) {
-		c.Fatalf("Expected output to contain %q, got %q", expected, string(b))
+	msg = getErrorMessage(c, b)
+	if !strings.Contains(msg, expected) {
+		c.Fatalf("Expected output to contain %q, got %q", expected, msg)
 	}
 }
 

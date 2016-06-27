@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/engine-api/client/transport/cancellable"
 	"github.com/docker/engine-api/types"
+	"github.com/docker/engine-api/types/versions"
 	"golang.org/x/net/context"
 )
 
@@ -112,7 +113,7 @@ func (cli *Client) sendClientRequest(ctx context.Context, method, path string, q
 			return serverResp, fmt.Errorf("%v.\n* Are you trying to connect to a TLS-enabled daemon without TLS?", err)
 		}
 
-		if cli.transport.Secure() && strings.Contains(err.Error(), "remote error: bad certificate") {
+		if cli.transport.Secure() && strings.Contains(err.Error(), "bad certificate") {
 			return serverResp, fmt.Errorf("The server probably has client authentication (--tlsverify) enabled. Please check your TLS client certification settings: %v", err)
 		}
 
@@ -133,7 +134,8 @@ func (cli *Client) sendClientRequest(ctx context.Context, method, path string, q
 		}
 
 		var errorMessage string
-		if resp.Header.Get("Content-Type") == "application/json" {
+		if (cli.version == "" || versions.GreaterThan(cli.version, "1.23")) &&
+			resp.Header.Get("Content-Type") == "application/json" {
 			var errorResponse types.ErrorResponse
 			if err := json.Unmarshal(body, &errorResponse); err != nil {
 				return serverResp, fmt.Errorf("Error reading JSON: %v", err)

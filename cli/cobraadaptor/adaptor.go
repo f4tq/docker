@@ -1,9 +1,17 @@
 package cobraadaptor
 
 import (
-	"fmt"
-
 	"github.com/docker/docker/api/client"
+	"github.com/docker/docker/api/client/container"
+	"github.com/docker/docker/api/client/image"
+	"github.com/docker/docker/api/client/network"
+	"github.com/docker/docker/api/client/node"
+	"github.com/docker/docker/api/client/plugin"
+	"github.com/docker/docker/api/client/registry"
+	"github.com/docker/docker/api/client/service"
+	"github.com/docker/docker/api/client/stack"
+	"github.com/docker/docker/api/client/swarm"
+	"github.com/docker/docker/api/client/system"
 	"github.com/docker/docker/api/client/volume"
 	"github.com/docker/docker/cli"
 	cliflags "github.com/docker/docker/cli/flags"
@@ -30,11 +38,56 @@ func NewCobraAdaptor(clientFlags *cliflags.ClientFlags) CobraAdaptor {
 	}
 	rootCmd.SetUsageTemplate(usageTemplate)
 	rootCmd.SetHelpTemplate(helpTemplate)
-	rootCmd.SetFlagErrorFunc(flagErrorFunc)
+	rootCmd.SetFlagErrorFunc(cli.FlagErrorFunc)
 	rootCmd.SetOutput(stdout)
 	rootCmd.AddCommand(
+		node.NewNodeCommand(dockerCli),
+		service.NewServiceCommand(dockerCli),
+		stack.NewStackCommand(dockerCli),
+		stack.NewTopLevelDeployCommand(dockerCli),
+		swarm.NewSwarmCommand(dockerCli),
+		container.NewAttachCommand(dockerCli),
+		container.NewCommitCommand(dockerCli),
+		container.NewCopyCommand(dockerCli),
+		container.NewCreateCommand(dockerCli),
+		container.NewDiffCommand(dockerCli),
+		container.NewExportCommand(dockerCli),
+		container.NewKillCommand(dockerCli),
+		container.NewLogsCommand(dockerCli),
+		container.NewPauseCommand(dockerCli),
+		container.NewPortCommand(dockerCli),
+		container.NewPsCommand(dockerCli),
+		container.NewRenameCommand(dockerCli),
+		container.NewRestartCommand(dockerCli),
+		container.NewRmCommand(dockerCli),
+		container.NewRunCommand(dockerCli),
+		container.NewStartCommand(dockerCli),
+		container.NewStatsCommand(dockerCli),
+		container.NewStopCommand(dockerCli),
+		container.NewTopCommand(dockerCli),
+		container.NewUnpauseCommand(dockerCli),
+		container.NewUpdateCommand(dockerCli),
+		container.NewWaitCommand(dockerCli),
+		image.NewBuildCommand(dockerCli),
+		image.NewHistoryCommand(dockerCli),
+		image.NewImagesCommand(dockerCli),
+		image.NewLoadCommand(dockerCli),
+		image.NewRemoveCommand(dockerCli),
+		image.NewSaveCommand(dockerCli),
+		image.NewPullCommand(dockerCli),
+		image.NewPushCommand(dockerCli),
+		image.NewSearchCommand(dockerCli),
+		image.NewImportCommand(dockerCli),
+		image.NewTagCommand(dockerCli),
+		network.NewNetworkCommand(dockerCli),
+		system.NewEventsCommand(dockerCli),
+		registry.NewLoginCommand(dockerCli),
+		registry.NewLogoutCommand(dockerCli),
+		system.NewVersionCommand(dockerCli),
 		volume.NewVolumeCommand(dockerCli),
+		system.NewInfoCommand(dockerCli),
 	)
+	plugin.NewPluginCommand(rootCmd, dockerCli)
 
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print usage")
 	rootCmd.PersistentFlags().MarkShorthandDeprecated("help", "please use --help")
@@ -50,13 +103,17 @@ func NewCobraAdaptor(clientFlags *cliflags.ClientFlags) CobraAdaptor {
 func (c CobraAdaptor) Usage() []cli.Command {
 	cmds := []cli.Command{}
 	for _, cmd := range c.rootCmd.Commands() {
-		cmds = append(cmds, cli.Command{Name: cmd.Use, Description: cmd.Short})
+		if cmd.Name() != "" {
+			cmds = append(cmds, cli.Command{Name: cmd.Name(), Description: cmd.Short})
+		}
 	}
 	return cmds
 }
 
 func (c CobraAdaptor) run(cmd string, args []string) error {
-	c.dockerCli.Initialize()
+	if err := c.dockerCli.Initialize(); err != nil {
+		return err
+	}
 	// Prepend the command name to support normal cobra command delegation
 	c.rootCmd.SetArgs(append([]string{cmd}, args...))
 	return c.rootCmd.Execute()
@@ -72,20 +129,6 @@ func (c CobraAdaptor) Command(name string) func(...string) error {
 		}
 	}
 	return nil
-}
-
-// flagErrorFunc prints an error messages which matches the format of the
-// docker/docker/cli error messages
-func flagErrorFunc(cmd *cobra.Command, err error) error {
-	if err == nil {
-		return err
-	}
-
-	usage := ""
-	if cmd.HasSubCommands() {
-		usage = "\n\n" + cmd.UsageString()
-	}
-	return fmt.Errorf("%s\nSee '%s --help'.%s", err, cmd.CommandPath(), usage)
 }
 
 var usageTemplate = `Usage:	{{if not .HasSubCommands}}{{if .HasLocalFlags}}{{appendIfNotPresent .UseLine "[OPTIONS]"}}{{else}}{{.UseLine}}{{end}}{{end}}{{if .HasSubCommands}}{{ .CommandPath}} COMMAND{{end}}

@@ -190,6 +190,11 @@ Images using the v2 or later image format have a content-addressable identifier
 called a digest. As long as the input used to generate the image is unchanged,
 the digest value is predictable and referenceable.
 
+The following example runs a container from the `alpine` image with the 
+`sha256:9cacb71397b640eca97488cf08582ae4e4068513101088e9f96c9814bfda95e0` digest:
+
+    $ docker run alpine@sha256:9cacb71397b640eca97488cf08582ae4e4068513101088e9f96c9814bfda95e0 date
+
 ## PID settings (--pid)
 
     --pid=""  : Set the PID (Process) Namespace mode for the container,
@@ -283,18 +288,19 @@ of the containers.
 
 ## Network settings
 
-    --dns=[]         : Set custom dns servers for the container
-    --net="bridge"   : Connect a container to a network
-                        'bridge': create a network stack on the default Docker bridge
-                        'none': no networking
-                        'container:<name|id>': reuse another container's network stack
-                        'host': use the Docker host network stack
-                        '<network-name>|<network-id>': connect to a user-defined network
-    --net-alias=[]   : Add network-scoped alias for the container
-    --add-host=""    : Add a line to /etc/hosts (host:IP)
-    --mac-address="" : Sets the container's Ethernet device's MAC address
-    --ip=""          : Sets the container's Ethernet device's IPv4 address
-    --ip6=""         : Sets the container's Ethernet device's IPv6 address
+    --dns=[]           : Set custom dns servers for the container
+    --net="bridge"     : Connect a container to a network
+                          'bridge': create a network stack on the default Docker bridge
+                          'none': no networking
+                          'container:<name|id>': reuse another container's network stack
+                          'host': use the Docker host network stack
+                          '<network-name>|<network-id>': connect to a user-defined network
+    --net-alias=[]     : Add network-scoped alias for the container
+    --add-host=""      : Add a line to /etc/hosts (host:IP)
+    --mac-address=""   : Sets the container's Ethernet device's MAC address
+    --ip=""            : Sets the container's Ethernet device's IPv4 address
+    --ip6=""           : Sets the container's Ethernet device's IPv6 address
+    --link-local-ip=[] : Sets one or more container's Ethernet device's link local IPv4/IPv6 addresses
 
 By default, all containers have networking enabled and they can make any
 outgoing connections. The operator can completely disable networking
@@ -1073,7 +1079,7 @@ Both flags take limits in the `<device-path>:<limit>` format. Both read and
 write rates must be a positive integer.
 
 ## Additional groups
-    --group-add: Add additional groups to run as 
+    --group-add: Add additional groups to run as
 
 By default, the docker container process runs with the supplementary groups looked
 up for the specified user. If one wants to add more to that list of groups, then
@@ -1497,8 +1503,8 @@ The example below mounts an empty tmpfs into the container with the `rw`,
 > a volume.
 
 The volumes commands are complex enough to have their own documentation
-in section [*Managing data in
-containers*](../userguide/containers/dockervolumes.md). A developer can define
+in section [*Manage data in
+containers*](../tutorials/dockervolumes.md). A developer can define
 one or more `VOLUME`'s associated with an image, but only the operator
 can give access from one container to another (or from a container to a
 volume mounted on the host).
@@ -1527,7 +1533,7 @@ Dockerfile `USER` instruction. When starting a container, the operator can overr
 the `USER` instruction by passing the `-u` option.
 
     -u="", --user="": Sets the username or UID used and optionally the groupname or GID for the specified command.
- 
+
     The followings examples are all valid:
     --user=[ user | user:group | uid | uid:gid | user:gid | uid:group ]
 

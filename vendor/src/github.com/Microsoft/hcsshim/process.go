@@ -2,8 +2,6 @@ package hcsshim
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"syscall"
 	"time"
@@ -11,16 +9,7 @@ import (
 	"github.com/Sirupsen/logrus"
 )
 
-var (
-	ErrInvalidProcessState = errors.New("the process is in an invalid state for the attempted operation")
-)
-
-type ProcessError struct {
-	Process   *process
-	Operation string
-	Err       error
-}
-
+// ContainerError is an error encountered in HCS
 type process struct {
 	handle         hcsProcess
 	processID      int
@@ -51,7 +40,7 @@ type closeHandle struct {
 }
 
 type processStatus struct {
-	ProcessId      uint32
+	ProcessID      uint32
 	Exited         bool
 	ExitCode       uint32
 	LastWaitResult int32
@@ -85,9 +74,7 @@ func (process *process) Kill() error {
 	if err == ErrVmcomputeOperationPending {
 		return ErrVmcomputeOperationPending
 	} else if err != nil {
-		err := &ProcessError{Operation: operation, Process: process, Err: err}
-		logrus.Error(err)
-		return err
+		return makeProcessError(process, operation, "", err)
 	}
 
 	logrus.Debugf(title+" succeeded processid=%d", process.processID)
@@ -103,16 +90,12 @@ func (process *process) Wait() error {
 	if hcsCallbacksSupported {
 		err := waitForNotification(process.callbackNumber, hcsNotificationProcessExited, nil)
 		if err != nil {
-			err := &ProcessError{Operation: operation, Process: process, Err: err}
-			logrus.Error(err)
-			return err
+			return makeProcessError(process, operation, "", err)
 		}
 	} else {
 		_, err := process.waitTimeoutInternal(syscall.INFINITE)
 		if err != nil {
-			err := &ProcessError{Operation: operation, Process: process, Err: err}
-			logrus.Error(err)
-			return err
+			return makeProcessError(process, operation, "", err)
 		}
 	}
 
@@ -129,21 +112,15 @@ func (process *process) WaitTimeout(timeout time.Duration) error {
 
 	if hcsCallbacksSupported {
 		err := waitForNotification(process.callbackNumber, hcsNotificationProcessExited, &timeout)
-		if err == ErrTimeout {
-			return ErrTimeout
-		} else if err != nil {
-			err := &ProcessError{Operation: operation, Process: process, Err: err}
-			logrus.Error(err)
-			return err
+		if err != nil {
+			return makeProcessError(process, operation, "", err)
 		}
 	} else {
 		finished, err := waitTimeoutHelper(process, timeout)
 		if !finished {
 			return ErrTimeout
 		} else if err != nil {
-			err := &ProcessError{Operation: operation, Process: process, Err: err}
-			logrus.Error(err)
-			return err
+			return makeProcessError(process, operation, "", err)
 		}
 	}
 
@@ -179,9 +156,7 @@ func (process *process) ExitCode() (int, error) {
 
 	properties, err := process.properties()
 	if err != nil {
-		err := &ProcessError{Operation: operation, Process: process, Err: err}
-		logrus.Error(err)
-		return 0, err
+		return 0, makeProcessError(process, operation, "", err)
 	}
 
 	if properties.Exited == false {
@@ -217,9 +192,7 @@ func (process *process) ResizeConsole(width, height uint16) error {
 	err = hcsModifyProcess(process.handle, modifyRequestStr, &resultp)
 	err = processHcsResult(err, resultp)
 	if err != nil {
-		err := &ProcessError{Operation: operation, Process: process, Err: err}
-		logrus.Error(err)
-		return err
+		return makeProcessError(process, operation, "", err)
 	}
 
 	logrus.Debugf(title+" succeeded processid=%d", process.processID)
@@ -238,13 +211,11 @@ func (process *process) properties() (*processStatus, error) {
 	err := hcsGetProcessProperties(process.handle, &propertiesp, &resultp)
 	err = processHcsResult(err, resultp)
 	if err != nil {
-		err := &ProcessError{Operation: operation, Process: process, Err: err}
-		logrus.Error(err)
-		return nil, err
+		return nil, makeProcessError(process, operation, "", err)
 	}
 
 	if propertiesp == nil {
-		return nil, errors.New("Unexpected result from hcsGetProcessProperties, properties should never be nil")
+		return nil, ErrUnexpectedValue
 	}
 	propertiesRaw := convertAndFreeCoTaskMemBytes(propertiesp)
 
@@ -275,9 +246,7 @@ func (process *process) Stdio() (io.WriteCloser, io.ReadCloser, io.ReadCloser, e
 		err := hcsGetProcessInfo(process.handle, &processInfo, &resultp)
 		err = processHcsResult(err, resultp)
 		if err != nil {
-			err = &ProcessError{Operation: operation, Process: process, Err: err}
-			logrus.Error(err)
-			return nil, nil, nil, err
+			return nil, nil, nil, makeProcessError(process, operation, "", err)
 		}
 
 		stdIn, stdOut, stdErr = processInfo.StdInput, processInfo.StdOutput, processInfo.StdError
@@ -323,9 +292,7 @@ func (process *process) CloseStdin() error {
 	err = hcsModifyProcess(process.handle, modifyRequestStr, &resultp)
 	err = processHcsResult(err, resultp)
 	if err != nil {
-		err = &ProcessError{Operation: operation, Process: process, Err: err}
-		logrus.Error(err)
-		return err
+		return makeProcessError(process, operation, "", err)
 	}
 
 	logrus.Debugf(title+" succeeded processid=%d", process.processID)
@@ -346,16 +313,12 @@ func (process *process) Close() error {
 
 	if hcsCallbacksSupported {
 		if err := process.unregisterCallback(); err != nil {
-			err = &ProcessError{Operation: operation, Process: process, Err: err}
-			logrus.Error(err)
-			return err
+			return makeProcessError(process, operation, "", err)
 		}
 	}
 
 	if err := hcsCloseProcess(process.handle); err != nil {
-		err = &ProcessError{Operation: operation, Process: process, Err: err}
-		logrus.Error(err)
-		return err
+		return makeProcessError(process, operation, "", err)
 	}
 
 	process.handle = 0
@@ -370,16 +333,15 @@ func closeProcess(process *process) {
 }
 
 func (process *process) registerCallback() error {
-	callbackMapLock.Lock()
-	defer callbackMapLock.Unlock()
-
-	callbackNumber := nextCallback
-	nextCallback++
-
 	context := &notifcationWatcherContext{
 		channels: newChannels(),
 	}
+
+	callbackMapLock.Lock()
+	callbackNumber := nextCallback
+	nextCallback++
 	callbackMap[callbackNumber] = context
+	callbackMapLock.Unlock()
 
 	var callbackHandle hcsCallback
 	err := hcsRegisterProcessCallback(process.handle, notificationWatcherCallback, callbackNumber, &callbackHandle)
@@ -395,48 +357,34 @@ func (process *process) registerCallback() error {
 func (process *process) unregisterCallback() error {
 	callbackNumber := process.callbackNumber
 
-	callbackMapLock.Lock()
-	defer callbackMapLock.Unlock()
-	handle := callbackMap[callbackNumber].handle
+	callbackMapLock.RLock()
+	context := callbackMap[callbackNumber]
+	callbackMapLock.RUnlock()
+
+	if context == nil {
+		return nil
+	}
+
+	handle := context.handle
 
 	if handle == 0 {
 		return nil
 	}
 
+	// hcsUnregisterProcessCallback has its own syncronization
+	// to wait for all callbacks to complete. We must NOT hold the callbackMapLock.
 	err := hcsUnregisterProcessCallback(handle)
 	if err != nil {
 		return err
 	}
 
+	closeChannels(context.channels)
+
+	callbackMapLock.Lock()
 	callbackMap[callbackNumber] = nil
+	callbackMapLock.Unlock()
 
 	handle = 0
 
 	return nil
-}
-
-func (e *ProcessError) Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-
-	if e.Process == nil {
-		return "Unexpected nil process for error: " + e.Err.Error()
-	}
-
-	s := fmt.Sprintf("process %d", e.Process.processID)
-
-	if e.Process.container != nil {
-		s += " in container " + e.Process.container.id
-	}
-
-	if e.Operation != "" {
-		s += " " + e.Operation
-	}
-
-	if e.Err != nil {
-		s += fmt.Sprintf(" failed in Win32: %s (0x%x)", e.Err, win32FromError(e.Err))
-	}
-
-	return s
 }

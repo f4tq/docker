@@ -28,8 +28,9 @@ const (
 	// than this, the check is considered to have failed.
 	defaultProbeTimeout = 30 * time.Second
 
-	// Shut down a container if it becomes Unhealthy.
-	defaultExitOnUnhealthy = true
+	// Default number of consecutive failures of the health check
+	// for the container to be considered unhealthy.
+	defaultProbeRetries = 3
 
 	// Maximum number of entries to record
 	maxLogEntries = 5
@@ -111,7 +112,7 @@ func handleProbeResult(d *Daemon, c *container.Container, result *types.Healthch
 
 	retries := c.Config.Healthcheck.Retries
 	if retries <= 0 {
-		retries = 1 // Default if unset or set to an invalid value
+		retries = defaultProbeRetries
 	}
 
 	h := c.State.Health
@@ -129,7 +130,7 @@ func handleProbeResult(d *Daemon, c *container.Container, result *types.Healthch
 	} else if result.ExitCode == exitStatusStarting && c.State.Health.Status == types.Starting {
 		// The container is not ready yet. Remain in the starting state.
 	} else {
-		// Failure (incuding invalid exit code)
+		// Failure (including invalid exit code)
 		h.FailingStreak++
 		if c.State.Health.FailingStreak >= retries {
 			h.Status = types.Unhealthy
@@ -150,10 +151,10 @@ func monitor(d *Daemon, c *container.Container, stop chan struct{}, probe probe)
 	for {
 		select {
 		case <-stop:
-			logrus.Debugf("Stop healthcheck monitoring (received while idle)")
+			logrus.Debug("Stop healthcheck monitoring (received while idle)")
 			return
 		case <-time.After(probeInterval):
-			logrus.Debugf("Running health check...")
+			logrus.Debug("Running health check...")
 			startTime := time.Now()
 			ctx, cancelProbe := context.WithTimeout(context.Background(), probeTimeout)
 			results := make(chan *types.HealthcheckResult)
@@ -176,7 +177,7 @@ func monitor(d *Daemon, c *container.Container, stop chan struct{}, probe probe)
 			}()
 			select {
 			case <-stop:
-				logrus.Debugf("Stop healthcheck monitoring (received while probing)")
+				logrus.Debug("Stop healthcheck monitoring (received while probing)")
 				// Stop timeout and kill probe, but don't wait for probe to exit.
 				cancelProbe()
 				return
@@ -185,7 +186,7 @@ func monitor(d *Daemon, c *container.Container, stop chan struct{}, probe probe)
 				// Stop timeout
 				cancelProbe()
 			case <-ctx.Done():
-				logrus.Debugf("Health check taking too long")
+				logrus.Debug("Health check taking too long")
 				handleProbeResult(d, c, &types.HealthcheckResult{
 					ExitCode: -1,
 					Output:   fmt.Sprintf("Health check exceeded timeout (%v)", probeTimeout),
