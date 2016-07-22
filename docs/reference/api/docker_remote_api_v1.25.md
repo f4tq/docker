@@ -311,6 +311,7 @@ Create a container
              "MemorySwappiness": 60,
              "OomKillDisable": false,
              "OomScoreAdj": 500,
+             "PidMode": "",
              "PidsLimit": -1,
              "PortBindings": { "22/tcp": [{ "HostPort": "11022" }] },
              "PublishAllPorts": false,
@@ -422,6 +423,9 @@ Create a container
     -   **MemorySwappiness** - Tune a container's memory swappiness behavior. Accepts an integer between 0 and 100.
     -   **OomKillDisable** - Boolean value, whether to disable OOM Killer for the container or not.
     -   **OomScoreAdj** - An integer value containing the score given to the container in order to tune OOM killer preferences.
+    -   **PidMode** - Set the PID (Process) Namespace mode for the container;
+          `"container:<name|id>"`: joins another container's PID namespace
+          `"host"`: use the host's PID namespace inside the container
     -   **PidsLimit** - Tune a container's pids limit. Set -1 for unlimited.
     -   **PortBindings** - A map of exposed container ports and the host port they
           should map to. A JSON object in the form
@@ -489,6 +493,7 @@ Create a container
 -   **400** – bad parameter
 -   **404** – no such container
 -   **406** – impossible to attach (container not running)
+-   **409** – conflict
 -   **500** – server error
 
 ### Inspect a container
@@ -583,6 +588,7 @@ Return low-level information on the container `id`
 			"OomKillDisable": false,
 			"OomScoreAdj": 500,
 			"NetworkMode": "bridge",
+			"PidMode": "",
 			"PortBindings": {},
 			"Privileged": false,
 			"ReadonlyRootfs": false,
@@ -1404,6 +1410,7 @@ Remove the container `id` from the filesystem
 -   **204** – no error
 -   **400** – bad parameter
 -   **404** – no such container
+-   **409** – conflict
 -   **500** – server error
 
 ### Retrieving information about files and folders in a container
@@ -1648,7 +1655,7 @@ the path to the alternate build instructions file to use.
 
 The archive may include any number of other files,
 which are accessible in the build context (See the [*ADD build
-command*](../../reference/builder.md#dockerbuilder)).
+command*](../../reference/builder.md#add)).
 
 The build is canceled if the client drops the connection by quitting
 or being killed.
@@ -2277,7 +2284,7 @@ Show the docker version information
          "Version": "1.12.0-dev",
          "Os": "linux",
          "KernelVersion": "3.19.0-23-generic",
-         "GoVersion": "go1.6.2",
+         "GoVersion": "go1.6.3",
          "GitCommit": "deadbee",
          "Arch": "amd64",
          "ApiVersion": "1.25",
@@ -3345,7 +3352,6 @@ List nodes
         "UpdatedAt": "2016-06-07T20:31:11.999868824Z",
         "Spec": {
           "Role": "MANAGER",
-          "Membership": "ACCEPTED",
           "Availability": "ACTIVE"
         },
         "Description": {
@@ -3475,7 +3481,6 @@ Return low-level information on the node `id`
       "UpdatedAt": "2016-06-07T20:31:11.999868824Z",
       "Spec": {
         "Role": "MANAGER",
-        "Membership": "ACCEPTED",
         "Availability": "ACTIVE"
       },
       "Description": {
@@ -3589,18 +3594,6 @@ Initialize a new Swarm
       "ListenAddr": "0.0.0.0:4500",
       "ForceNewCluster": false,
       "Spec": {
-        "AcceptancePolicy": {
-          "Policies": [
-            {
-              "Role": "MANAGER",
-              "Autoaccept": false
-            },
-            {
-              "Role": "WORKER",
-              "Autoaccept": true
-            }
-          ]
-        },
         "Orchestration": {},
         "Raft": {},
         "Dispatcher": {},
@@ -3670,9 +3663,7 @@ Join an existing new Swarm
     {
       "ListenAddr": "0.0.0.0:4500",
       "RemoteAddrs": ["node1:4500"],
-      "Secret": "",
-      "CACertHash": "",
-      "Manager": false
+      "JoinToken": "SWMTKN-1-3pu6hszjas19xyp7ghgosyx9k8atbfcr8p2is99znpy26u2lkl-7p73s1dx5in4tatdymyhg9hu2"
     }
 
 **Example response**:
@@ -3692,9 +3683,7 @@ JSON Parameters:
 - **ListenAddr** – Listen address used for inter-manager communication if the node gets promoted to
   manager, as well as determining the networking interface used for the VXLAN Tunnel Endpoint (VTEP).
 - **RemoteAddr** – Address of any manager node already participating in the Swarm to join.
-- **Secret** – Secret token for joining this Swarm.
-- **CACertHash** – Optional hash of the root CA to avoid relying on trust on first use.
-- **Manager** – Directly join as a manager (only for a Swarm configured to autoaccept managers).
+- **JoinToken** – Secret token for joining this Swarm.
 
 ### Leave a Swarm
 
@@ -3735,18 +3724,6 @@ Update a Swarm
 
     {
       "Name": "default",
-      "AcceptancePolicy": {
-        "Policies": [
-          {
-            "Role": "WORKER",
-            "Autoaccept": false
-          },
-          {
-            "Role": "MANAGER",
-            "Autoaccept": false
-          }
-        ]
-      },
       "Orchestration": {
         "TaskHistoryRetentionLimit": 10
       },
@@ -3761,6 +3738,10 @@ Update a Swarm
       },
       "CAConfig": {
         "NodeCertExpiry": 7776000000000000
+      },
+      "JoinTokens": {
+        "Worker": "SWMTKN-1-3pu6hszjas19xyp7ghgosyx9k8atbfcr8p2is99znpy26u2lkl-1awxwuwd3z9j1z3puu7rcgdbx",
+        "Manager": "SWMTKN-1-3pu6hszjas19xyp7ghgosyx9k8atbfcr8p2is99znpy26u2lkl-7p73s1dx5in4tatdymyhg9hu2"
       }
     }
 
@@ -3771,6 +3752,13 @@ Update a Swarm
     Content-Length: 0
     Content-Type: text/plain; charset=utf-8
 
+**Query parameters**:
+
+- **version** – The version number of the swarm object being updated. This is
+  required to avoid conflicting writes.
+- **rotate_worker_token** - Set to `true` to rotate the worker join token.
+- **rotate_manager_token** - Set to `true` to rotate the manager join token.
+
 **Status codes**:
 
 - **200** – no error
@@ -3779,11 +3767,6 @@ Update a Swarm
 
 JSON Parameters:
 
-- **Policies** – An array of acceptance policies.
-    - **Role** – The role that policy applies to (`MANAGER` or `WORKER`)
-    - **Autoaccept** – A boolean indicating whether nodes joining for that role should be
-      automatically accepted in the Swarm.
-    - **Secret** – An optional secret to provide for nodes to join the Swarm.
 - **Orchestration** – Configuration settings for the orchestration aspects of the Swarm.
     - **TaskHistoryRetentionLimit** – Maximum number of tasks history stored.
 - **Raft** – Raft related configuration.
@@ -3805,6 +3788,9 @@ JSON Parameters:
         - **URL** - URL where certificate signing requests should be sent.
         - **Options** - An object with key/value pairs that are interpreted
           as protocol-specific options for the external CA driver.
+- **JoinTokens** - Tokens that can be used by other nodes to join the Swarm.
+    - **Worker** - Token to use for joining as a worker.
+    - **Manager** - Token to use for joining as a manager.
 
 ## 3.8 Services
 
@@ -3920,33 +3906,68 @@ Create a service
     Content-Type: application/json
 
     {
-      "Name": "redis",
+      "Name": "web",
       "TaskTemplate": {
         "ContainerSpec": {
-          "Image": "redis"
+          "Image": "nginx:alpine",
+          "Mounts": [
+            {
+              "ReadOnly": true,
+              "Source": "web-data",
+              "Target": "/usr/share/nginx/html",
+              "Type": "volume",
+              "VolumeOptions": {
+                "DriverConfig": {
+                },
+                "Labels": {
+                  "com.example.something": "something-value"
+                }
+              }
+            }
+          ],
+          "User": "33"
         },
+        "LogDriver": {
+          "Name": "json-file",
+          "Options": {
+            "max-file": "3",
+            "max-size": "10M"
+          }
+        },
+        "Placement": {},
         "Resources": {
-          "Limits": {},
-          "Reservations": {}
+          "Limits": {
+            "MemoryBytes": 104857600.0
+          },
+          "Reservations": {
+          }
         },
-        "RestartPolicy": {},
-        "Placement": {}
+        "RestartPolicy": {
+          "Condition": "on-failure",
+          "Delay": 10000000000.0,
+          "MaxAttempts": 10
+        }
       },
       "Mode": {
         "Replicated": {
-          "Replicas": 1
+          "Replicas": 4
         }
       },
       "UpdateConfig": {
-        "Parallelism": 1
+        "Delay": 30000000000.0,
+        "Parallelism": 2
       },
       "EndpointSpec": {
-        "ExposedPorts": [
+        "Ports": [
           {
             "Protocol": "tcp",
-            "Port": 6379
+            "PublishedPort": 8080,
+            "TargetPort": 80
           }
         ]
+      },
+      "Labels": {
+        "foo": "bar"
       }
     }
 
@@ -3980,8 +4001,8 @@ JSON Parameters:
         - **User** – A string value specifying the user inside the container.
         - **Labels** – A map of labels to associate with the service (e.g.,
           `{"key":"value"[,"key2":"value2"]}`).
-        - **Mounts** – Specification for mounts to be added to containers created as part of the new.
-          service.
+        - **Mounts** – Specification for mounts to be added to containers
+          created as part of the service.
             - **Target** – Container path.
             - **Source** – Mount source (e.g. a volume name, a host path).
             - **Type** – The mount type (`bind`, or `volume`).
@@ -3997,14 +4018,19 @@ JSON Parameters:
                   - **Options** - key/value map of driver specific options.
         - **StopGracePeriod** – Amount of time to wait for the container to terminate before
           forcefully killing it.
+    - **LogDriver** - Log configuration for containers created as part of the
+      service.
+        - **Name** - Name of the logging driver to use (`json-file`, `syslog`,
+          `journald`, `gelf`, `fluentd`, `awslogs`, `splunk`, `etwlogs`, `none`).
+        - **Options** - Driver-specific options.
     - **Resources** – Resource requirements which apply to each individual container created as part
       of the service.
         - **Limits** – Define resources limits.
-            - **CPU** – CPU limit
-            - **Memory** – Memory limit
+            - **NanoCPUs** – CPU limit in units of 10<sup>-9</sup> CPU shares.
+            - **MemoryBytes** – Memory limit in Bytes.
         - **Reservation** – Define resources reservation.
-            - **CPU** – CPU reservation
-            - **Memory** – Memory reservation
+            - **NanoCPUs** – CPU reservation in units of 10<sup>-9</sup> CPU shares.
+            - **MemoryBytes** – Memory reservation in Bytes.
     - **RestartPolicy** – Specification for the restart policy which applies to containers created
       as part of this service.
         - **Condition** – Condition for restart (`none`, `on-failure`, or `any`).
@@ -4246,6 +4272,10 @@ Update the service `id`.
           of: `"Ports": { "<port>/<tcp|udp>: {}" }`
     - **VirtualIPs**
 
+**Query parameters**:
+
+- **version** – The version number of the service object being updated. This is
+  required to avoid conflicting writes.
 
 **Status codes**:
 

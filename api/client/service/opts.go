@@ -196,7 +196,7 @@ func (m *MountOpt) Set(value string) error {
 		key, value := parts[0], parts[1]
 		switch strings.ToLower(key) {
 		case "type":
-			mount.Type = swarm.MountType(strings.ToUpper(value))
+			mount.Type = swarm.MountType(strings.ToLower(value))
 		case "source":
 			mount.Source = value
 		case "target":
@@ -208,7 +208,7 @@ func (m *MountOpt) Set(value string) error {
 			}
 			mount.ReadOnly = ro
 		case "bind-propagation":
-			bindOptions().Propagation = swarm.MountPropagation(strings.ToUpper(value))
+			bindOptions().Propagation = swarm.MountPropagation(strings.ToLower(value))
 		case "volume-nocopy":
 			volumeOptions().NoCopy, err = strconv.ParseBool(value)
 			if err != nil {
@@ -218,7 +218,7 @@ func (m *MountOpt) Set(value string) error {
 			setValueOnMap(volumeOptions().Labels, value)
 		case "volume-driver":
 			volumeOptions().DriverConfig.Name = value
-		case "volume-driver-opt":
+		case "volume-opt":
 			if volumeOptions().DriverConfig.Options == nil {
 				volumeOptions().DriverConfig.Options = make(map[string]string)
 			}
@@ -240,10 +240,10 @@ func (m *MountOpt) Set(value string) error {
 		return fmt.Errorf("source is required when specifying volume-* options")
 	}
 
-	if mount.Type == swarm.MountType("BIND") && mount.VolumeOptions != nil {
+	if mount.Type == swarm.MountTypeBind && mount.VolumeOptions != nil {
 		return fmt.Errorf("cannot mix 'volume-*' options with mount type '%s'", swarm.MountTypeBind)
 	}
-	if mount.Type == swarm.MountType("VOLUME") && mount.BindOptions != nil {
+	if mount.Type == swarm.MountTypeVolume && mount.BindOptions != nil {
 		return fmt.Errorf("cannot mix 'bind-*' options with mount type '%s'", swarm.MountTypeVolume)
 	}
 
@@ -358,6 +358,27 @@ func convertPortToPortConfig(
 	return ports
 }
 
+type logDriverOptions struct {
+	name string
+	opts opts.ListOpts
+}
+
+func newLogDriverOptions() logDriverOptions {
+	return logDriverOptions{opts: opts.NewListOpts(runconfigopts.ValidateEnv)}
+}
+
+func (ldo *logDriverOptions) toLogDriver() *swarm.Driver {
+	if ldo.name == "" {
+		return nil
+	}
+
+	// set the log driver only if specified.
+	return &swarm.Driver{
+		Name:    ldo.name,
+		Options: runconfigopts.ConvertKVStringsToMap(ldo.opts.GetAll()),
+	}
+}
+
 // ValidatePort validates a string is in the expected format for a port definition
 func ValidatePort(value string) (string, error) {
 	portMappings, err := nat.ParsePortSpec(value)
@@ -373,7 +394,6 @@ type serviceOptions struct {
 	name    string
 	labels  opts.ListOpts
 	image   string
-	command []string
 	args    []string
 	env     opts.ListOpts
 	workdir string
@@ -393,6 +413,8 @@ type serviceOptions struct {
 	endpoint      endpointOptions
 
 	registryAuth bool
+
+	logDriver logDriverOptions
 }
 
 func newServiceOptions() *serviceOptions {
@@ -402,6 +424,7 @@ func newServiceOptions() *serviceOptions {
 		endpoint: endpointOptions{
 			ports: opts.NewListOpts(ValidatePort),
 		},
+		logDriver: newLogDriverOptions(),
 	}
 }
 
@@ -416,7 +439,6 @@ func (opts *serviceOptions) ToService() (swarm.ServiceSpec, error) {
 		TaskTemplate: swarm.TaskSpec{
 			ContainerSpec: swarm.ContainerSpec{
 				Image:           opts.image,
-				Command:         opts.command,
 				Args:            opts.args,
 				Env:             opts.env.GetAll(),
 				Dir:             opts.workdir,
@@ -429,6 +451,7 @@ func (opts *serviceOptions) ToService() (swarm.ServiceSpec, error) {
 			Placement: &swarm.Placement{
 				Constraints: opts.constraints,
 			},
+			LogDriver: opts.logDriver.toLogDriver(),
 		},
 		Mode: swarm.ServiceMode{},
 		UpdateConfig: &swarm.UpdateConfig{
@@ -461,12 +484,9 @@ func (opts *serviceOptions) ToService() (swarm.ServiceSpec, error) {
 func addServiceFlags(cmd *cobra.Command, opts *serviceOptions) {
 	flags := cmd.Flags()
 	flags.StringVar(&opts.name, flagName, "", "Service name")
-	flags.VarP(&opts.labels, flagLabel, "l", "Service labels")
 
-	flags.VarP(&opts.env, "env", "e", "Set environment variables")
 	flags.StringVarP(&opts.workdir, "workdir", "w", "", "Working directory inside the container")
 	flags.StringVarP(&opts.user, flagUser, "u", "", "Username or UID")
-	flags.VarP(&opts.mounts, flagMount, "m", "Attach a mount to the service")
 
 	flags.Var(&opts.resources.limitCPU, flagLimitCPU, "Limit CPUs")
 	flags.Var(&opts.resources.limitMemBytes, flagLimitMemory, "Limit Memory")
@@ -481,29 +501,41 @@ func addServiceFlags(cmd *cobra.Command, opts *serviceOptions) {
 	flags.Var(&opts.restartPolicy.maxAttempts, flagRestartMaxAttempts, "Maximum number of restarts before giving up")
 	flags.Var(&opts.restartPolicy.window, flagRestartWindow, "Window used to evaluate the restart policy")
 
-	flags.StringSliceVar(&opts.constraints, flagConstraint, []string{}, "Placement constraints")
-
 	flags.Uint64Var(&opts.update.parallelism, flagUpdateParallelism, 0, "Maximum number of tasks updated simultaneously")
 	flags.DurationVar(&opts.update.delay, flagUpdateDelay, time.Duration(0), "Delay between updates")
 
-	flags.StringSliceVar(&opts.networks, flagNetwork, []string{}, "Network attachments")
 	flags.StringVar(&opts.endpoint.mode, flagEndpointMode, "", "Endpoint mode (vip or dnsrr)")
-	flags.VarP(&opts.endpoint.ports, flagPublish, "p", "Publish a port as a node port")
 
-	flags.BoolVar(&opts.registryAuth, flagRegistryAuth, false, "Send registry authentication details to Swarm agents")
+	flags.BoolVar(&opts.registryAuth, flagRegistryAuth, false, "Send registry authentication details to swarm agents")
+
+	flags.StringVar(&opts.logDriver.name, flagLogDriver, "", "Logging driver for service")
+	flags.Var(&opts.logDriver.opts, flagLogOpt, "Logging driver options")
 }
 
 const (
 	flagConstraint         = "constraint"
+	flagConstraintRemove   = "constraint-rm"
+	flagConstraintAdd      = "constraint-add"
 	flagEndpointMode       = "endpoint-mode"
+	flagEnv                = "env"
+	flagEnvRemove          = "env-rm"
+	flagEnvAdd             = "env-add"
 	flagLabel              = "label"
+	flagLabelRemove        = "label-rm"
+	flagLabelAdd           = "label-add"
 	flagLimitCPU           = "limit-cpu"
 	flagLimitMemory        = "limit-memory"
 	flagMode               = "mode"
 	flagMount              = "mount"
+	flagMountRemove        = "mount-rm"
+	flagMountAdd           = "mount-add"
 	flagName               = "name"
 	flagNetwork            = "network"
+	flagNetworkRemove      = "network-rm"
+	flagNetworkAdd         = "network-add"
 	flagPublish            = "publish"
+	flagPublishRemove      = "publish-rm"
+	flagPublishAdd         = "publish-add"
 	flagReplicas           = "replicas"
 	flagReserveCPU         = "reserve-cpu"
 	flagReserveMemory      = "reserve-memory"
@@ -516,4 +548,6 @@ const (
 	flagUpdateParallelism  = "update-parallelism"
 	flagUser               = "user"
 	flagRegistryAuth       = "registry-auth"
+	flagLogDriver          = "log-driver"
+	flagLogOpt             = "log-opt"
 )

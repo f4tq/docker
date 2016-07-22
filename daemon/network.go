@@ -127,6 +127,14 @@ func (daemon *Daemon) SetupIngress(create clustertypes.NetworkCreateRequest, nod
 				return
 			}
 
+			// Cleanup any stale endpoints that might be left over during previous iterations
+			epList := n.Endpoints()
+			for _, ep := range epList {
+				if err := ep.Delete(true); err != nil {
+					logrus.Errorf("Failed to delete endpoint %s (%s): %v", ep.Name(), ep.ID(), err)
+				}
+			}
+
 			if err := n.Delete(); err != nil {
 				logrus.Errorf("Failed to delete stale ingress network %s: %v", n.ID(), err)
 				return
@@ -152,7 +160,9 @@ func (daemon *Daemon) SetupIngress(create clustertypes.NetworkCreateRequest, nod
 
 		sb, err := controller.NewSandbox("ingress-sbox", libnetwork.OptionIngress())
 		if err != nil {
-			logrus.Errorf("Failed creating ingress sandbox: %v", err)
+			if _, ok := err.(networktypes.ForbiddenError); !ok {
+				logrus.Errorf("Failed creating ingress sandbox: %v", err)
+			}
 			return
 		}
 

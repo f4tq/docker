@@ -42,7 +42,7 @@ func newInspectCommand(dockerCli *client.DockerCli) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.format, "format", "f", "", "Format the output using the given go template")
-	flags.BoolVarP(&opts.pretty, "pretty", "p", false, "Print the information in a human friendly format.")
+	flags.BoolVar(&opts.pretty, "pretty", false, "Print the information in a human friendly format.")
 	return cmd
 }
 
@@ -102,7 +102,6 @@ func printService(out io.Writer, service swarm.Service) {
 		}
 	}
 	fmt.Fprintln(out, "Placement:")
-	fmt.Fprintln(out, " Strategy:\tSpread")
 	if service.Spec.TaskTemplate.Placement != nil && len(service.Spec.TaskTemplate.Placement.Constraints) > 0 {
 		ioutils.FprintfIfNotEmpty(out, " Constraints\t: %s\n", strings.Join(service.Spec.TaskTemplate.Placement.Constraints, ", "))
 	}
@@ -114,24 +113,23 @@ func printService(out io.Writer, service swarm.Service) {
 	fmt.Fprintf(out, "ContainerSpec:\n")
 	printContainerSpec(out, service.Spec.TaskTemplate.ContainerSpec)
 
-	if service.Spec.TaskTemplate.Resources != nil {
+	resources := service.Spec.TaskTemplate.Resources
+	if resources != nil {
 		fmt.Fprintln(out, "Resources:")
-		printResources := func(out io.Writer, r *swarm.Resources) {
+		printResources := func(out io.Writer, requirement string, r *swarm.Resources) {
+			if r == nil || (r.MemoryBytes == 0 && r.NanoCPUs == 0) {
+				return
+			}
+			fmt.Fprintf(out, " %s:\n", requirement)
 			if r.NanoCPUs != 0 {
-				fmt.Fprintf(out, " CPU:\t\t%g\n", float64(r.NanoCPUs)/1e9)
+				fmt.Fprintf(out, "  CPU:\t\t%g\n", float64(r.NanoCPUs)/1e9)
 			}
 			if r.MemoryBytes != 0 {
-				fmt.Fprintf(out, " Memory:\t\t%s\n", units.BytesSize(float64(r.MemoryBytes)))
+				fmt.Fprintf(out, "  Memory:\t%s\n", units.BytesSize(float64(r.MemoryBytes)))
 			}
 		}
-		if service.Spec.TaskTemplate.Resources.Reservations != nil {
-			fmt.Fprintln(out, "Reservations:")
-			printResources(out, service.Spec.TaskTemplate.Resources.Reservations)
-		}
-		if service.Spec.TaskTemplate.Resources.Limits != nil {
-			fmt.Fprintln(out, "Limits:")
-			printResources(out, service.Spec.TaskTemplate.Resources.Limits)
-		}
+		printResources(out, "Reservations", resources.Reservations)
+		printResources(out, "Limits", resources.Limits)
 	}
 	if len(service.Spec.Networks) > 0 {
 		fmt.Fprintf(out, "Networks:")
@@ -143,7 +141,7 @@ func printService(out io.Writer, service swarm.Service) {
 	if len(service.Endpoint.Ports) > 0 {
 		fmt.Fprintln(out, "Ports:")
 		for _, port := range service.Endpoint.Ports {
-			fmt.Fprintf(out, " Name = %s\n", port.Name)
+			ioutils.FprintfIfNotEmpty(out, " Name = %s\n", port.Name)
 			fmt.Fprintf(out, " Protocol = %s\n", port.Protocol)
 			fmt.Fprintf(out, " TargetPort = %d\n", port.TargetPort)
 			fmt.Fprintf(out, " PublishedPort = %d\n", port.PublishedPort)
@@ -153,9 +151,6 @@ func printService(out io.Writer, service swarm.Service) {
 
 func printContainerSpec(out io.Writer, containerSpec swarm.ContainerSpec) {
 	fmt.Fprintf(out, " Image:\t\t%s\n", containerSpec.Image)
-	if len(containerSpec.Command) > 0 {
-		fmt.Fprintf(out, " Command:\t%s\n", strings.Join(containerSpec.Command, " "))
-	}
 	if len(containerSpec.Args) > 0 {
 		fmt.Fprintf(out, " Args:\t\t%s\n", strings.Join(containerSpec.Args, " "))
 	}

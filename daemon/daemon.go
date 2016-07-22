@@ -178,7 +178,7 @@ func (daemon *Daemon) restore() error {
 			rm := c.RestartManager(false)
 			if c.IsRunning() || c.IsPaused() {
 				if err := daemon.containerd.Restore(c.ID, libcontainerd.WithRestartManager(rm)); err != nil {
-					logrus.Errorf("Failed to restore with containerd: %q", err)
+					logrus.Errorf("Failed to restore %s with containerd: %s", c.ID, err)
 					return
 				}
 				if !c.HostConfig.NetworkMode.IsContainer() && c.IsRunning() {
@@ -434,7 +434,11 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 		}
 	}
 
-	if err = setupDaemonRoot(config, realRoot, rootUID, rootGID); err != nil {
+	if err := setupDaemonRoot(config, realRoot, rootUID, rootGID); err != nil {
+		return nil, err
+	}
+
+	if err := setupDaemonProcess(config); err != nil {
 		return nil, err
 	}
 
@@ -647,7 +651,7 @@ func (daemon *Daemon) Shutdown() error {
 	daemon.shutdown = true
 	// Keep mounts and networking running on daemon shutdown if
 	// we are to keep containers running and restore them.
-	if daemon.configStore.LiveRestore {
+	if daemon.configStore.LiveRestore && daemon.containers != nil {
 		// check if there are any running containers, if none we should do some cleanup
 		if ls, err := daemon.Containers(&types.ContainerListOptions{}); len(ls) != 0 || err != nil {
 			return nil
@@ -682,6 +686,8 @@ func (daemon *Daemon) Shutdown() error {
 			logrus.Errorf("Error during layer Store.Cleanup(): %v", err)
 		}
 	}
+
+	pluginShutdown()
 
 	if err := daemon.cleanupMounts(); err != nil {
 		return err

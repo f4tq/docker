@@ -44,8 +44,9 @@ Usage:  docker deploy [OPTIONS] STACK
 Create and update a stack
 
 Options:
-  -f, --bundle string   Path to a bundle (Default: STACK.dab)
+      --file   string   Path to a Distributed Application Bundle file (Default: STACK.dab)
       --help            Print usage
+      --registry-auth   Send registry authentication details to Swarm agents
 ```
 
 Let's deploy the stack created before:
@@ -93,6 +94,7 @@ Commands:
   config      Print the stack configuration
   deploy      Create and update a stack
   rm          Remove the stack
+  services    List the services in the stack
   tasks       List the tasks in the stack
 
 Run 'docker stack COMMAND --help' for more information on a command.
