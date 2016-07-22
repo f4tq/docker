@@ -362,6 +362,17 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 		NetworkingConfig: networkingConfig,
 		AdjustCPUShares:  adjustCPUShares,
 	}
+
+       logrus.Debugf("create:   containerRouter: %+v", cfg)
+       if s.policy != nil {
+               // run again
+               v:= s.policy
+               if err := v.ValidateCreate(&cfg); err != nil {
+                       return err
+               }
+       }
+
+
 	ccr, err := s.backend.ContainerCreate(cfg, validateHostname)
 	if err != nil {
 		return err
