@@ -36,7 +36,7 @@ func NewUpdateSupervisor(store *store.MemoryStore, restartSupervisor *RestartSup
 
 // Update starts an Update of `tasks` belonging to `service` in the background and returns immediately.
 // If an update for that service was already in progress, it will be cancelled before the new one starts.
-func (u *UpdateSupervisor) Update(ctx context.Context, service *api.Service, tasks []*api.Task) {
+func (u *UpdateSupervisor) Update(ctx context.Context, cluster *api.Cluster, service *api.Service, tasks []*api.Task) {
 	u.l.Lock()
 	defer u.l.Unlock()
 
@@ -49,7 +49,7 @@ func (u *UpdateSupervisor) Update(ctx context.Context, service *api.Service, tas
 	update := NewUpdater(u.store, u.restarts)
 	u.updates[id] = update
 	go func() {
-		update.Run(ctx, service, tasks)
+		update.Run(ctx, cluster, service, tasks)
 		u.l.Lock()
 		if u.updates[id] == update {
 			delete(u.updates, id)
@@ -98,13 +98,14 @@ func (u *Updater) Cancel() {
 }
 
 // Run starts the update and returns only once its complete or cancelled.
-func (u *Updater) Run(ctx context.Context, service *api.Service, tasks []*api.Task) {
+func (u *Updater) Run(ctx context.Context, cluster *api.Cluster, service *api.Service, tasks []*api.Task) {
 	defer close(u.doneChan)
 
 	dirtyTasks := []*api.Task{}
 	for _, t := range tasks {
 		if !reflect.DeepEqual(service.Spec.Task, t.Spec) ||
-			!reflect.DeepEqual(service.Endpoint, t.Endpoint) {
+			(t.Endpoint != nil &&
+				!reflect.DeepEqual(service.Spec.Endpoint, t.Endpoint.Spec)) {
 			dirtyTasks = append(dirtyTasks, t)
 		}
 	}
@@ -129,7 +130,7 @@ func (u *Updater) Run(ctx context.Context, service *api.Service, tasks []*api.Ta
 	wg.Add(parallelism)
 	for i := 0; i < parallelism; i++ {
 		go func() {
-			u.worker(ctx, service, taskQueue)
+			u.worker(ctx, cluster, service, taskQueue)
 			wg.Done()
 		}()
 	}
@@ -148,9 +149,9 @@ func (u *Updater) Run(ctx context.Context, service *api.Service, tasks []*api.Ta
 	wg.Wait()
 }
 
-func (u *Updater) worker(ctx context.Context, service *api.Service, queue <-chan *api.Task) {
+func (u *Updater) worker(ctx context.Context, cluster *api.Cluster, service *api.Service, queue <-chan *api.Task) {
 	for t := range queue {
-		updated := newTask(service, t.Slot)
+		updated := newTask(cluster, service, t.Slot)
 		updated.DesiredState = api.TaskStateReady
 		if isGlobalService(service) {
 			updated.NodeID = t.NodeID
@@ -190,6 +191,9 @@ func (u *Updater) updateTask(ctx context.Context, service *api.Service, original
 		t := store.GetTask(tx, original.ID)
 		if t == nil {
 			return fmt.Errorf("task %s not found while trying to update it", original.ID)
+		}
+		if t.DesiredState > api.TaskStateRunning {
+			return fmt.Errorf("task %s was already shut down when reached by updater", original.ID)
 		}
 		t.DesiredState = api.TaskStateShutdown
 		if err := store.UpdateTask(tx, t); err != nil {

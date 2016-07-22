@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/opts"
 	runconfigopts "github.com/docker/docker/runconfig/opts"
+	"github.com/docker/engine-api/types"
 	"github.com/docker/engine-api/types/swarm"
 	"github.com/docker/go-connections/nat"
 	"github.com/spf13/cobra"
@@ -37,19 +38,37 @@ func newUpdateCommand(dockerCli *client.DockerCli) *cobra.Command {
 }
 
 func runUpdate(dockerCli *client.DockerCli, flags *pflag.FlagSet, serviceID string) error {
-	client := dockerCli.Client()
+	apiClient := dockerCli.Client()
 	ctx := context.Background()
+	updateOpts := types.ServiceUpdateOptions{}
 
-	service, _, err := client.ServiceInspectWithRaw(ctx, serviceID)
+	service, _, err := apiClient.ServiceInspectWithRaw(ctx, serviceID)
 	if err != nil {
 		return err
 	}
 
-	err = updateService(&service.Spec, flags)
+	err = updateService(flags, &service.Spec)
 	if err != nil {
 		return err
 	}
-	err = client.ServiceUpdate(ctx, service.ID, service.Version, service.Spec)
+
+	// only send auth if flag was set
+	sendAuth, err := flags.GetBool(flagRegistryAuth)
+	if err != nil {
+		return err
+	}
+	if sendAuth {
+		// Retrieve encoded auth token from the image reference
+		// This would be the old image if it didn't change in this update
+		image := service.Spec.TaskTemplate.ContainerSpec.Image
+		encodedAuth, err := dockerCli.RetrieveAuthTokenFromImage(ctx, image)
+		if err != nil {
+			return err
+		}
+		updateOpts.EncodedRegistryAuth = encodedAuth
+	}
+
+	err = apiClient.ServiceUpdate(ctx, service.ID, service.Version, service.Spec, updateOpts)
 	if err != nil {
 		return err
 	}
@@ -58,7 +77,7 @@ func runUpdate(dockerCli *client.DockerCli, flags *pflag.FlagSet, serviceID stri
 	return nil
 }
 
-func updateService(spec *swarm.ServiceSpec, flags *pflag.FlagSet) error {
+func updateService(flags *pflag.FlagSet, spec *swarm.ServiceSpec) error {
 
 	updateString := func(flag string, field *string) {
 		if flags.Changed(flag) {
@@ -123,7 +142,7 @@ func updateService(spec *swarm.ServiceSpec, flags *pflag.FlagSet) error {
 	updateLabels(flags, &spec.Labels)
 	updateString("image", &cspec.Image)
 	updateSlice("command", &cspec.Command)
-	updateSlice("arg", &cspec.Command)
+	updateSlice("arg", &cspec.Args)
 	updateListOpts("env", &cspec.Env)
 	updateString("workdir", &cspec.Dir)
 	updateString(flagUser, &cspec.User)
@@ -162,7 +181,7 @@ func updateService(spec *swarm.ServiceSpec, flags *pflag.FlagSet) error {
 		updateSlice(flagConstraint, &task.Placement.Constraints)
 	}
 
-	if err := updateMode(flags, &spec.Mode); err != nil {
+	if err := updateReplicas(flags, &spec.Mode); err != nil {
 		return err
 	}
 
@@ -250,40 +269,14 @@ func updateNetworks(flags *pflag.FlagSet, attachments *[]swarm.NetworkAttachment
 	*attachments = localAttachments
 }
 
-func updateMode(flags *pflag.FlagSet, serviceMode *swarm.ServiceMode) error {
-	if !flags.Changed(flagMode) && !flags.Changed(flagReplicas) {
+func updateReplicas(flags *pflag.FlagSet, serviceMode *swarm.ServiceMode) error {
+	if !flags.Changed(flagReplicas) {
 		return nil
 	}
 
-	var mode string
-	if flags.Changed(flagMode) {
-		mode, _ = flags.GetString(flagMode)
-	}
-
-	if !(mode == "replicated" || serviceMode.Replicated != nil) && flags.Changed(flagReplicas) {
+	if serviceMode.Replicated == nil {
 		return fmt.Errorf("replicas can only be used with replicated mode")
 	}
-
-	if mode == "global" {
-		serviceMode.Replicated = nil
-		serviceMode.Global = &swarm.GlobalService{}
-		return nil
-	}
-
-	if flags.Changed(flagReplicas) {
-		replicas := flags.Lookup(flagReplicas).Value.(*Uint64Opt).Value()
-		serviceMode.Replicated = &swarm.ReplicatedService{Replicas: replicas}
-		serviceMode.Global = nil
-		return nil
-	}
-
-	if mode == "replicated" {
-		if serviceMode.Replicated != nil {
-			return nil
-		}
-		serviceMode.Replicated = &swarm.ReplicatedService{Replicas: &DefaultReplicas}
-		serviceMode.Global = nil
-	}
-
+	serviceMode.Replicated.Replicas = flags.Lookup(flagReplicas).Value.(*Uint64Opt).Value()
 	return nil
 }

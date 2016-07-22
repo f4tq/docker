@@ -14,7 +14,6 @@ import (
 	"github.com/docker/docker/pkg/discovery"
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/registry"
-	"github.com/docker/engine-api/types"
 	"github.com/imdario/mergo"
 )
 
@@ -27,6 +26,9 @@ const (
 	// maximum number of uploads that
 	// may take place at a time for each push.
 	defaultMaxConcurrentUploads = 5
+	// stockRuntimeName is the reserved name/alias used to represent the
+	// OCI runtime being shipped with the docker daemon package.
+	stockRuntimeName = "runc"
 )
 
 const (
@@ -270,7 +272,7 @@ func getConflictFreeConfiguration(configFile string, flags *flag.FlagSet) (*Conf
 		}
 
 		// Override flag values to make sure the values set in the config file with nullable values, like `false`,
-		// are not overriden by default truthy values from the flags that were not explicitly set.
+		// are not overridden by default truthy values from the flags that were not explicitly set.
 		// See https://github.com/docker/docker/issues/20289 for an example.
 		//
 		// TODO: Rewrite configuration logic to avoid same issue with other nullable values, like numbers.
@@ -427,12 +429,12 @@ func ValidateConfiguration(config *Config) error {
 
 	// validate that "default" runtime is not reset
 	if runtimes := config.GetAllRuntimes(); len(runtimes) > 0 {
-		if _, ok := runtimes[types.DefaultRuntimeName]; ok {
-			return fmt.Errorf("runtime name '%s' is reserved", types.DefaultRuntimeName)
+		if _, ok := runtimes[stockRuntimeName]; ok {
+			return fmt.Errorf("runtime name '%s' is reserved", stockRuntimeName)
 		}
 	}
 
-	if defaultRuntime := config.GetDefaultRuntimeName(); defaultRuntime != "" && defaultRuntime != types.DefaultRuntimeName {
+	if defaultRuntime := config.GetDefaultRuntimeName(); defaultRuntime != "" && defaultRuntime != stockRuntimeName {
 		runtimes := config.GetAllRuntimes()
 		if _, ok := runtimes[defaultRuntime]; !ok {
 			return fmt.Errorf("specified default runtime '%s' does not exist", defaultRuntime)

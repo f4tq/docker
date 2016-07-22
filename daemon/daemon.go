@@ -117,11 +117,13 @@ func (daemon *Daemon) restore() error {
 		return err
 	}
 
+	containerCount := 0
 	for _, v := range dir {
 		id := v.Name()
 		container, err := daemon.load(id)
 		if !debug && logrus.GetLevel() == logrus.InfoLevel {
 			fmt.Print(".")
+			containerCount++
 		}
 		if err != nil {
 			logrus.Errorf("Failed to load container %v: %v", id, err)
@@ -306,7 +308,7 @@ func (daemon *Daemon) restore() error {
 	group.Wait()
 
 	if !debug {
-		if logrus.GetLevel() == logrus.InfoLevel {
+		if logrus.GetLevel() == logrus.InfoLevel && containerCount > 0 {
 			fmt.Println()
 		}
 		logrus.Info("Loading containers: done.")
@@ -324,7 +326,7 @@ func (daemon *Daemon) waitForNetworks(c *container.Container) {
 	}
 	// Make sure if the container has a network that requires discovery that the discovery service is available before starting
 	for netName := range c.NetworkSettings.Networks {
-		// If we get `ErrNoSuchNetwork` here, it can assumed that it is due to discovery not being ready
+		// If we get `ErrNoSuchNetwork` here, we can assume that it is due to discovery not being ready
 		// Most likely this is because the K/V store used for discovery is in a container and needs to be started
 		if _, err := daemon.netController.NetworkByName(netName); err != nil {
 			if _, ok := err.(libnetwork.ErrNoSuchNetwork); !ok {
@@ -365,7 +367,7 @@ func (daemon *Daemon) registerLink(parent, child *container.Container, alias str
 	return nil
 }
 
-// SetClusterProvider sets a component for quering the current cluster state.
+// SetClusterProvider sets a component for querying the current cluster state.
 func (daemon *Daemon) SetClusterProvider(clusterProvider cluster.Provider) {
 	daemon.clusterProvider = clusterProvider
 	daemon.netController.SetClusterProvider(clusterProvider)
@@ -384,6 +386,11 @@ func (daemon *Daemon) IsSwarmCompatible() error {
 // requests from the webserver.
 func NewDaemon(config *Config, registryService registry.Service, containerdRemote libcontainerd.Remote) (daemon *Daemon, err error) {
 	setDefaultMtu(config)
+
+	// Ensure that we have a correct root key limit for launching containers.
+	if err := ModifyRootKeyLimit(); err != nil {
+		logrus.Warnf("unable to modify root key limit, number of containers could be limitied by this quota: %v", err)
+	}
 
 	// Ensure we have compatible and valid configuration options
 	if err := verifyDaemonSettings(config); err != nil {
@@ -538,10 +545,6 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 		return nil, fmt.Errorf("Couldn't create Tag store repositories: %s", err)
 	}
 
-	if err := restoreCustomImage(d.imageStore, d.layerStore, referenceStore); err != nil {
-		return nil, fmt.Errorf("Couldn't restore custom images: %s", err)
-	}
-
 	migrationStart := time.Now()
 	if err := v1.Migrate(config.Root, graphDriver, d.layerStore, d.imageStore, referenceStore, distributionMetadataStore); err != nil {
 		logrus.Errorf("Graph migration failed: %q. Your old graph data was found to be too inconsistent for upgrading to content-addressable storage. Some of the old data was probably not upgraded. We recommend starting over with a clean storage directory if possible.", err)
@@ -606,10 +609,10 @@ func (daemon *Daemon) shutdownContainer(c *container.Container) error {
 		// To terminate a process in freezer cgroup, we should send
 		// SIGTERM to this process then unfreeze it, and the process will
 		// force to terminate immediately.
-		logrus.Debugf("Found container %s is paused, sending SIGTERM before unpause it", c.ID)
+		logrus.Debugf("Found container %s is paused, sending SIGTERM before unpausing it", c.ID)
 		sig, ok := signal.SignalMap["TERM"]
 		if !ok {
-			return fmt.Errorf("System doesn not support SIGTERM")
+			return fmt.Errorf("System does not support SIGTERM")
 		}
 		if err := daemon.kill(c, int(sig)); err != nil {
 			return fmt.Errorf("sending SIGTERM to container %s with error: %v", c.ID, err)
@@ -618,7 +621,7 @@ func (daemon *Daemon) shutdownContainer(c *container.Container) error {
 			return fmt.Errorf("Failed to unpause container %s with error: %v", c.ID, err)
 		}
 		if _, err := c.WaitStop(10 * time.Second); err != nil {
-			logrus.Debugf("container %s failed to exit in 10 second of SIGTERM, sending SIGKILL to force", c.ID)
+			logrus.Debugf("container %s failed to exit in 10 seconds of SIGTERM, sending SIGKILL to force", c.ID)
 			sig, ok := signal.SignalMap["KILL"]
 			if !ok {
 				return fmt.Errorf("System does not support SIGKILL")
@@ -632,7 +635,7 @@ func (daemon *Daemon) shutdownContainer(c *container.Container) error {
 	}
 	// If container failed to exit in 10 seconds of SIGTERM, then using the force
 	if err := daemon.containerStop(c, 10); err != nil {
-		return fmt.Errorf("Stop container %s with error: %v", c.ID, err)
+		return fmt.Errorf("Failed to stop container %s with error: %v", c.ID, err)
 	}
 
 	c.WaitStop(-1 * time.Second)
@@ -645,8 +648,12 @@ func (daemon *Daemon) Shutdown() error {
 	// Keep mounts and networking running on daemon shutdown if
 	// we are to keep containers running and restore them.
 	if daemon.configStore.LiveRestore {
-		return nil
+		// check if there are any running containers, if none we should do some cleanup
+		if ls, err := daemon.Containers(&types.ContainerListOptions{}); len(ls) != 0 || err != nil {
+			return nil
+		}
 	}
+
 	if daemon.containers != nil {
 		logrus.Debug("starting clean shutdown of all containers...")
 		daemon.containers.ApplyAll(func(c *container.Container) {

@@ -48,7 +48,7 @@ func runInfo(dockerCli *client.DockerCli) error {
 
 			// print a warning if devicemapper is using a loopback file
 			if pair[0] == "Data loop file" {
-				fmt.Fprintln(dockerCli.Err(), " WARNING: Usage of loopback devices is strongly discouraged for production use. Either use `--storage-opt dm.thinpooldev` or use `--storage-opt dm.no_warn_on_loop_devices=true` to suppress this warning.")
+				fmt.Fprintln(dockerCli.Err(), " WARNING: Usage of loopback devices is strongly discouraged for production use. Use `--storage-opt dm.thinpooldev` to specify a custom block storage device.")
 			}
 		}
 
@@ -58,7 +58,6 @@ func runInfo(dockerCli *client.DockerCli) error {
 			fmt.Fprintf(dockerCli.Out(), "%s: %s\n", pair[0], pair[1])
 		}
 	}
-	ioutils.FprintfIfNotEmpty(dockerCli.Out(), "Execution Driver: %s\n", info.ExecutionDriver)
 	ioutils.FprintfIfNotEmpty(dockerCli.Out(), "Logging Driver: %s\n", info.LoggingDriver)
 	ioutils.FprintfIfNotEmpty(dockerCli.Out(), "Cgroup Driver: %s\n", info.CgroupDriver)
 

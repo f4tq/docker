@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"sync"
 	"time"
 
 	"github.com/docker/swarmkit/api"
@@ -37,7 +36,6 @@ type Agent struct {
 	stopped chan struct{} // requests shutdown
 	closed  chan struct{} // only closed in run
 	err     error         // read only after closed is closed
-	mu      sync.Mutex
 }
 
 // New returns a new agent, ready for task dispatch.
@@ -197,6 +195,13 @@ func (a *Agent) run(ctx context.Context) {
 				log.G(ctx).WithError(err).Error("agent: closing session failed")
 			}
 			sessionq = nil
+			// if we're here before <-registered, do nothing for that event
+			registered = nil
+
+			// Bounce the connection.
+			if a.config.Picker != nil {
+				a.config.Picker.Reset()
+			}
 		case <-session.closed:
 			log.G(ctx).Debugf("agent: rebuild session")
 

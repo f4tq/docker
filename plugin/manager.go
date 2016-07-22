@@ -155,12 +155,18 @@ func Handle(capability string, callback func(string, *plugins.Client)) {
 
 func (pm *Manager) get(name string) (*plugin, error) {
 	pm.RLock()
+	defer pm.RUnlock()
+
 	id, nameOk := pm.nameToID[name]
-	p, idOk := pm.plugins[id]
-	pm.RUnlock()
-	if !nameOk || !idOk {
+	if !nameOk {
 		return nil, ErrNotFound(name)
 	}
+
+	p, idOk := pm.plugins[id]
+	if !idOk {
+		return nil, ErrNotFound(name)
+	}
+
 	return p, nil
 }
 
@@ -246,7 +252,7 @@ func LookupWithCapability(name, capability string) (Plugin, error) {
 
 // StateChanged updates daemon inter...
 func (pm *Manager) StateChanged(id string, e libcontainerd.StateInfo) error {
-	logrus.Debugf("plugin statechanged %s %#v", id, e)
+	logrus.Debugf("plugin state changed %s %#v", id, e)
 
 	return nil
 }

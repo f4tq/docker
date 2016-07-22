@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"sort"
+
 	"github.com/docker/go-events"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/log"
@@ -13,6 +15,21 @@ import (
 // services and creates and destroys tasks as necessary to match the service
 // specifications. This is different from task-level orchestration, which
 // responds to changes in individual tasks (or nodes which run them).
+
+func (r *ReplicatedOrchestrator) initCluster(readTx store.ReadTx) error {
+	clusters, err := store.FindClusters(readTx, store.ByName("default"))
+	if err != nil {
+		return err
+	}
+
+	if len(clusters) != 1 {
+		// we'll just pick it when it is created.
+		return nil
+	}
+
+	r.cluster = clusters[0]
+	return nil
+}
 
 func (r *ReplicatedOrchestrator) initServices(readTx store.ReadTx) error {
 	services, err := store.FindServices(readTx, store.All)
@@ -68,6 +85,36 @@ func (r *ReplicatedOrchestrator) resolveService(ctx context.Context, task *api.T
 	return service
 }
 
+type tasksByRunningState []*api.Task
+
+func (ts tasksByRunningState) Len() int      { return len(ts) }
+func (ts tasksByRunningState) Swap(i, j int) { ts[i], ts[j] = ts[j], ts[i] }
+
+func (ts tasksByRunningState) Less(i, j int) bool {
+	return ts[i].Status.State == api.TaskStateRunning && ts[j].Status.State != api.TaskStateRunning
+}
+
+type taskWithIndex struct {
+	task *api.Task
+
+	// index is a counter that counts this task as the nth instance of
+	// the service on its node. This is used for sorting the tasks so that
+	// when scaling down we leave tasks more evenly balanced.
+	index int
+}
+
+type tasksByIndex []taskWithIndex
+
+func (ts tasksByIndex) Len() int      { return len(ts) }
+func (ts tasksByIndex) Swap(i, j int) { ts[i], ts[j] = ts[j], ts[i] }
+
+func (ts tasksByIndex) Less(i, j int) bool {
+	if ts[i].index < 0 {
+		return false
+	}
+	return ts[i].index < ts[j].index
+}
+
 func (r *ReplicatedOrchestrator) reconcile(ctx context.Context, service *api.Service) {
 	var (
 		tasks []*api.Task
@@ -97,13 +144,11 @@ func (r *ReplicatedOrchestrator) reconcile(ctx context.Context, service *api.Ser
 	deploy := service.Spec.GetMode().(*api.ServiceSpec_Replicated)
 	specifiedInstances := int(deploy.Replicated.Replicas)
 
-	// TODO(aaronl): Add support for restart delays.
-
 	switch {
 	case specifiedInstances > numTasks:
 		log.G(ctx).Debugf("Service %s was scaled up from %d to %d instances", service.ID, numTasks, specifiedInstances)
 		// Update all current tasks then add missing tasks
-		r.updater.Update(ctx, service, runningTasks)
+		r.updater.Update(ctx, r.cluster, service, runningTasks)
 		_, err = r.store.Batch(func(batch *store.Batch) error {
 			r.addTasks(ctx, batch, service, runningInstances, specifiedInstances-numTasks)
 			return nil
@@ -115,9 +160,43 @@ func (r *ReplicatedOrchestrator) reconcile(ctx context.Context, service *api.Ser
 	case specifiedInstances < numTasks:
 		// Update up to N tasks then remove the extra
 		log.G(ctx).Debugf("Service %s was scaled down from %d to %d instances", service.ID, numTasks, specifiedInstances)
-		r.updater.Update(ctx, service, runningTasks[:specifiedInstances])
+
+		// Preferentially remove tasks on the nodes that have the most
+		// copies of this service, to leave a more balanced result.
+
+		// First sort tasks such that tasks which are currently running
+		// (in terms of observed state) appear before non-running tasks.
+		// This will cause us to prefer to remove non-running tasks, all
+		// other things being equal in terms of node balance.
+
+		sort.Sort(tasksByRunningState(runningTasks))
+
+		// Assign each task an index that counts it as the nth copy of
+		// of the service on its node (1, 2, 3, ...), and sort the
+		// tasks by this counter value.
+
+		instancesByNode := make(map[string]int)
+		tasksWithIndices := make(tasksByIndex, 0, numTasks)
+
+		for _, t := range runningTasks {
+			if t.NodeID != "" {
+				instancesByNode[t.NodeID]++
+				tasksWithIndices = append(tasksWithIndices, taskWithIndex{task: t, index: instancesByNode[t.NodeID]})
+			} else {
+				tasksWithIndices = append(tasksWithIndices, taskWithIndex{task: t, index: -1})
+			}
+		}
+
+		sort.Sort(tasksWithIndices)
+
+		sortedTasks := make([]*api.Task, 0, numTasks)
+		for _, t := range tasksWithIndices {
+			sortedTasks = append(sortedTasks, t.task)
+		}
+
+		r.updater.Update(ctx, r.cluster, service, sortedTasks[:specifiedInstances])
 		_, err = r.store.Batch(func(batch *store.Batch) error {
-			r.removeTasks(ctx, batch, service, runningTasks[specifiedInstances:])
+			r.removeTasks(ctx, batch, service, sortedTasks[specifiedInstances:])
 			return nil
 		})
 		if err != nil {
@@ -126,7 +205,7 @@ func (r *ReplicatedOrchestrator) reconcile(ctx context.Context, service *api.Ser
 
 	case specifiedInstances == numTasks:
 		// Simple update, no scaling - update all tasks.
-		r.updater.Update(ctx, service, runningTasks)
+		r.updater.Update(ctx, r.cluster, service, runningTasks)
 	}
 }
 
@@ -142,7 +221,7 @@ func (r *ReplicatedOrchestrator) addTasks(ctx context.Context, batch *store.Batc
 		}
 
 		err := batch.Update(func(tx store.Tx) error {
-			return store.CreateTask(tx, newTask(service, instance))
+			return store.CreateTask(tx, newTask(r.cluster, service, instance))
 		})
 		if err != nil {
 			log.G(ctx).Errorf("Failed to create task: %v", err)

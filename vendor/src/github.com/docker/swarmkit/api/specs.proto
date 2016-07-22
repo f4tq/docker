@@ -78,7 +78,7 @@ message ServiceSpec {
 	// instructing Swarm on how this service should work on the particular
 	// network.
 	message NetworkAttachmentConfig {
-		// Target specifies the target network for attachement. This value may be a
+		// Target specifies the target network for attachment. This value may be a
 		// network name or identifier. Only identifiers are supported at this time.
 		string target = 1;
 		// Aliases specifies a list of discoverable alternate names for the service on this Target.
@@ -91,12 +91,12 @@ message ServiceSpec {
 	EndpointSpec endpoint = 8;
 }
 
-// ReplicatedService set the reconcilation target to certain number of replicas.
+// ReplicatedService sets the reconciliation target to certain number of replicas.
 message ReplicatedService {
 	uint64 replicas = 1;
 }
 
-// GlobalService represent global service.
+// GlobalService represents global service.
 message GlobalService {
 	// Empty message for now.
 }
@@ -114,6 +114,10 @@ message TaskSpec {
 
 	// Placement specifies node selection constraints
 	Placement placement = 5;
+
+	// LogDriver specifies the log driver to use for the task. Any runtime will
+	// direct logs into the specified driver for the duration of the task.
+	Driver log_driver = 6;
 }
 
 // Container specifies runtime parameters for a container.
@@ -138,10 +142,13 @@ message ContainerSpec {
 	// executable and the following elements are treated as arguments.
 	//
 	// If command is empty, execution will fall back to the image's entrypoint.
+	//
+	// Command should only be used when overriding entrypoint.
 	repeated string command = 3;
 
 	// Args specifies arguments provided to the image's entrypoint.
-	// Ignored if command is specified.
+	//
+	// If Command and Args are provided, Args will be appended to Command.
 	repeated string args = 4;
 
 	// Env specifies the environment variables for the container in NAME=VALUE
@@ -240,4 +247,11 @@ message ClusterSpec {
 
 	// CAConfig defines cluster-level certificate authority settings.
 	CAConfig ca_config = 6 [(gogoproto.nullable) = false, (gogoproto.customname) = "CAConfig"];
+
+	// DefaultLogDriver specifies the log driver to use for the cluster if not
+	// specified for each task.
+	//
+	// If this is changed, only new tasks will pick up the new log driver.
+	// Existing tasks will continue to use the previous default until rescheduled.
+	Driver default_log_driver = 7;
 }

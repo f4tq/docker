@@ -172,7 +172,7 @@ func (b *Builder) runContextCommand(args []string, allowRemote bool, allowLocalD
 	}
 
 	cmd := b.runConfig.Cmd
-	b.runConfig.Cmd = strslice.StrSlice(append(getShell(b.runConfig), "#(nop) %s %s in %s ", cmdName, srcHash, dest))
+	b.runConfig.Cmd = strslice.StrSlice(append(getShell(b.runConfig), fmt.Sprintf("#(nop) %s %s in %s ", cmdName, srcHash, dest)))
 	defer func(cmd strslice.StrSlice) { b.runConfig.Cmd = cmd }(cmd)
 
 	if hit, err := b.probeCache(); err != nil {
@@ -181,7 +181,7 @@ func (b *Builder) runContextCommand(args []string, allowRemote bool, allowLocalD
 		return nil
 	}
 
-	container, err := b.docker.ContainerCreate(types.ContainerCreateConfig{Config: b.runConfig})
+	container, err := b.docker.ContainerCreate(types.ContainerCreateConfig{Config: b.runConfig}, true)
 	if err != nil {
 		return err
 	}
@@ -421,7 +421,7 @@ func (b *Builder) processImageFrom(img builder.Image) error {
 		fmt.Fprintf(b.Stderr, "# Executing %d build %s...\n", nTriggers, word)
 	}
 
-	// Copy the ONBUILD triggers, and remove them from the config, since the config will be committed.
+	// Copy the ONBUILD triggers, and remove them from the config, since the config will be comitted.
 	onBuildTriggers := b.runConfig.OnBuild
 	b.runConfig.OnBuild = []string{}
 
@@ -508,7 +508,7 @@ func (b *Builder) create() (string, error) {
 	c, err := b.docker.ContainerCreate(types.ContainerCreateConfig{
 		Config:     b.runConfig,
 		HostConfig: hostConfig,
-	})
+	}, true)
 	if err != nil {
 		return "", err
 	}
@@ -552,7 +552,7 @@ func (b *Builder) run(cID string) (err error) {
 		}
 	}()
 
-	if err := b.docker.ContainerStart(cID, nil); err != nil {
+	if err := b.docker.ContainerStart(cID, nil, true); err != nil {
 		return err
 	}
 

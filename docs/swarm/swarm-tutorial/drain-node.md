@@ -31,7 +31,7 @@ run your manager node. For example, the tutorial uses a machine named
     ```bash
     $ docker node ls
 
-    ID                           NAME      MEMBERSHIP  STATUS  AVAILABILITY     MANAGER STATUS  LEADER
+    ID                           HOSTNAME  MEMBERSHIP  STATUS  AVAILABILITY     MANAGER STATUS  LEADER
     1bcef6utixb0l0ca7gxuivsj0    worker2   Accepted    Ready   Active
     38ciaotwjuritcdtn9npbnkuz    worker1   Accepted    Ready   Active
     e216jshn25ckzbvmwlnh5jr3g *  manager1  Accepted    Ready   Active        Reachable       Yes
@@ -129,5 +129,3 @@ drained node to an active state:
   * during a rolling update
   * when you set another node to `Drain` availability
   * when a task fails on another active node
-
-<p style="margin-bottom:300px">&nbsp;</p>

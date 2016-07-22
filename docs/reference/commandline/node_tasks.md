@@ -11,15 +11,17 @@ parent = "smn_cli"
 
 # node tasks
 
-    Usage:  docker node tasks [OPTIONS] NODE
+```markdown
+Usage:  docker node tasks [OPTIONS] self|NODE
 
-    List tasks running on a node
+List tasks running on a node
 
-    Options:
-      -a, --all            Display all instances
-      -f, --filter value   Filter output based on conditions provided
+Options:
+  -a, --all            Display all instances
+  -f, --filter value   Filter output based on conditions provided
       --help           Print usage
-      -n, --no-resolve     Do not map IDs to Names
+  -n, --no-resolve     Do not map IDs to Names
+```
 
 Lists all the tasks on a Node that Docker knows about. You can filter using the `-f` or `--filter` flag. Refer to the [filtering](#filtering) section for more information about available filter options.
 
@@ -41,12 +43,12 @@ than one filter, then pass multiple flags (e.g., `--filter "foo=bar" --filter "b
 
 The currently supported filters are:
 
-* name
-* id
-* label
-* desired_state
+* [name](#name)
+* [id](#id)
+* [label](#label)
+* [desired-state](#desired-state)
 
-### name
+#### name
 
 The `name` filter matches on all or part of a task's name.
 
@@ -61,7 +63,7 @@ The following filter matches all tasks with a name containing the `redis` string
     0tgctg8h8cech4w0k0gwrmr23  redis.10  redis    redis:3.0.6  Running 5 seconds   Running        swarm-manager1
 
 
-### id
+#### id
 
 The `id` filter matches a task's id.
 
@@ -83,6 +85,11 @@ ID                         NAME     SERVICE  IMAGE        LAST STATE          DE
 b465edgho06e318egmgjbqo4o  redis.6  redis    redis:3.0.6  Running 10 minutes  Running        swarm-manager1
 bg8c07zzg87di2mufeq51a2qp  redis.7  redis    redis:3.0.6  Running 9 minutes   Running        swarm-manager1
 ```
+
+
+#### desired-state
+
+The `desired-state` filter can take the values `running` and `accepted`.
 
 
 ## Related information

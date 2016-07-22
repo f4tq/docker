@@ -4,6 +4,8 @@ package main
 
 import (
 	"encoding/json"
+	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/pkg/integration/checker"
@@ -104,7 +106,7 @@ func (s *DockerSwarmSuite) TestSwarmInit(c *check.C) {
 
 	c.Assert(d.Leave(true), checker.IsNil)
 
-	out, err = d.Cmd("swarm", "init", "--auto-accept", "none")
+	out, err = d.Cmd("swarm", "init", "--auto-accept", "none", "--secret", "")
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
 
 	spec = getSpec()
@@ -133,4 +135,37 @@ func (s *DockerSwarmSuite) TestSwarmInitIPv6(c *check.C) {
 	out, err = d2.Cmd("info")
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
 	c.Assert(out, checker.Contains, "Swarm: active")
+}
+
+func (s *DockerSwarmSuite) TestSwarmIncompatibleDaemon(c *check.C) {
+	// init swarm mode and stop a daemon
+	d := s.AddDaemon(c, true, true)
+	info, err := d.info()
+	c.Assert(err, checker.IsNil)
+	c.Assert(info.LocalNodeState, checker.Equals, swarm.LocalNodeStateActive)
+	c.Assert(d.Stop(), checker.IsNil)
+
+	// start a daemon with --cluster-store and --cluster-advertise
+	err = d.Start("--cluster-store=consul://consuladdr:consulport/some/path", "--cluster-advertise=1.1.1.1:2375")
+	c.Assert(err, checker.NotNil)
+	content, _ := ioutil.ReadFile(d.logFile.Name())
+	c.Assert(string(content), checker.Contains, "--cluster-store and --cluster-advertise daemon configurations are incompatible with swarm mode")
+
+	// start a daemon with --live-restore
+	err = d.Start("--live-restore")
+	c.Assert(err, checker.NotNil)
+	content, _ = ioutil.ReadFile(d.logFile.Name())
+	c.Assert(string(content), checker.Contains, "--live-restore daemon configuration is incompatible with swarm mode")
+	// restart for teardown
+	c.Assert(d.Start(), checker.IsNil)
+}
+
+// Test case for #24090
+func (s *DockerSwarmSuite) TestSwarmNodeListHostname(c *check.C) {
+	d := s.AddDaemon(c, true, true)
+
+	// The first line should contain "HOSTNAME"
+	out, err := d.Cmd("node", "ls")
+	c.Assert(err, checker.IsNil)
+	c.Assert(strings.Split(out, "\n")[0], checker.Contains, "HOSTNAME")
 }
