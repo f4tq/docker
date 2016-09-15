@@ -14,6 +14,7 @@ import (
 	"github.com/docker/distribution/uuid"
 	"github.com/docker/docker/api"
 	apiserver "github.com/docker/docker/api/server"
+	"github.com/docker/docker/api/server/policy"
 	"github.com/docker/docker/api/server/middleware"
 	"github.com/docker/docker/api/server/router"
 	"github.com/docker/docker/api/server/router/build"
@@ -297,20 +298,20 @@ func (cli *DaemonCli) start() (err error) {
 
 	cli.initMiddlewares(api, serverConfig)
 
-	var policy router.Policy
+	var the_policy policy.Policy
         if *cli.configFile != "" {
-		polCfg,polErr := router.GetPolicyConfiguration(*cli.policyConfigFile)
+		polCfg,polErr := policy.GetPolicyConfiguration(*cli.policyConfigFile)
 		if polErr != nil {
 			return polErr
 		}
-		if cp, err := router.NewPolicy(polCfg); err != nil {
+		if cp, err := policy.NewPolicy(polCfg); err != nil {
 			return err
 		} else {
-			policy = cp
+			the_policy = cp
 		}
 	}
 
-	initRouter(api, d, c,policy)
+	initRouter(api, d, c,the_policy)
 
 	cli.d = d
 	cli.setupConfigReloadTrap()
@@ -426,7 +427,7 @@ func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfi
 	return config, nil
 }
 
-func initRouter(s *apiserver.Server, d *daemon.Daemon, c *cluster.Cluster,p router.Policy) {
+func initRouter(s *apiserver.Server, d *daemon.Daemon, c *cluster.Cluster,p policy.Policy) {
 	decoder := runconfig.ContainerDecoder{}
 
 	routers := []router.Router{

@@ -3,6 +3,7 @@ package container
 import (
 	"github.com/docker/docker/api/server/httputils"
 	"github.com/docker/docker/api/server/router"
+	"github.com/docker/docker/api/server/policy"
 )
 
 type validationError struct {
@@ -18,11 +19,11 @@ type containerRouter struct {
 	backend Backend
 	decoder httputils.ContainerDecoder
 	routes  []router.Route
-	policy  router.Policy
+	policy  policy.Policy
 }
 
 // NewRouter initializes a new container router
-func NewRouter(b Backend, decoder httputils.ContainerDecoder, policy router.Policy) router.Router {
+func NewRouter(b Backend, decoder httputils.ContainerDecoder, policy policy.Policy) router.Router {
 	r := &containerRouter{
 		backend: b,
 		decoder: decoder,
@@ -37,7 +38,7 @@ func (r *containerRouter) Routes() []router.Route {
 	return r.routes
 }
 // Routes returns the Policy to the container controller
-func (r *containerRouter) Policy() router.Policy {
+func (r *containerRouter) Policy() policy.Policy {
 	return r.policy
 }
 // initRoutes initializes the routes in container router

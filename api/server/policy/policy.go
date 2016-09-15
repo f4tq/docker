@@ -1,4 +1,4 @@
-package router
+package policy
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/ioutil"
 	"github.com/Sirupsen/logrus"
-	//containertypes "github.com/docker/engine-api/types/container"
 	"github.com/docker/engine-api/types"
 	"github.com/robertkrimen/otto"
 	"os"
@@ -368,24 +367,18 @@ func (pol *PolicyT) jsInvoke(operation string, args ...interface{} ) (bool) {
 		if operation == "validateCreate" {
 			logrus.Debugf("applyProfile: '%s'\n", call.Argument(0).String())
 			createOptions := args[0].(*types.ContainerCreateConfig)
-			logrus.Debugf("applyProfile: createOptions %T\n",createOptions)
 
 			cfg := createOptions.HostConfig.LogConfig
 			// clear the map in case something was set
 			for k := range cfg.Config {
 				delete(cfg.Config, k)
 			}
-			logrus.Debugf("applyProfile: logConfig %T %v\n",cfg,cfg)
 			profile := pol.Config.LoggingProfiles[call.Argument(0).String()]
-			logrus.Debugf("pol.Config.LoggingProfiles: %+v\n",pol.Config.LoggingProfiles)
-			logrus.Debugf("applyProfile: profile %T\n",profile)
 			profile_bytes,err := json.Marshal(profile)
-			logrus.Debugf("applyProfile: profile_bytes %+v err: %v\n",profile,err)
 			if err != nil {
 				panic(err)
 			}
 			err = json.Unmarshal(profile_bytes,&cfg.Config)
-			logrus.Debugf("applyProfile: after marshal logConfig %T %v\n",cfg,cfg)
 			if err != nil {
 				panic(err)
 			}
